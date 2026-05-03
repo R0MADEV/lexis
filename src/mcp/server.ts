@@ -2490,13 +2490,32 @@ function refreshIfStale(current: Index, resolvedPath: string): Index {
   lastStalenessCheck = now;
 
   const indexTime = new Date(current.createdAt).getTime();
+
+  // 1. Check existing indexed files for modifications
   const hasStaleFile = current.files.some((f) => {
     try { return fs.statSync(f).mtimeMs > indexTime; } catch { return true; }
   });
 
-  if (!hasStaleFile) return current;
+  // 2. Check all top-level directories for new files — creating a file updates the dir mtime.
+  // Scanning first-level dirs covers any language/framework structure without a hardcoded list.
+  const IGNORE_TOP = new Set([".git", "node_modules", "vendor", "dist", "build", ".next", "__pycache__"]);
+  const topDirs: string[] = [resolvedPath]; // always check project root itself
+  try {
+    for (const entry of fs.readdirSync(resolvedPath, { withFileTypes: true })) {
+      if (entry.isDirectory() && !IGNORE_TOP.has(entry.name)) {
+        topDirs.push(path.join(resolvedPath, entry.name));
+      }
+    }
+  } catch { /* ignore read errors */ }
 
-  const updated = buildIndex(resolvedPath, current, "file change detected — auto re-index");
+  const hasNewFile = topDirs.some((dir) => {
+    try { return fs.statSync(dir).mtimeMs > indexTime; } catch { return false; }
+  });
+
+  if (!hasStaleFile && !hasNewFile) return current;
+
+  const reason = hasNewFile && !hasStaleFile ? "new file detected" : "file change detected";
+  const updated = buildIndex(resolvedPath, current, `${reason} — auto re-index`);
   toolCache.clear();
   return updated;
 }

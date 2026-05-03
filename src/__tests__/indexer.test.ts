@@ -84,6 +84,39 @@ type Server struct{}
   });
 });
 
+describe("indexProject — any language/framework structure", () => {
+  test("indexes files in non-standard dirs: components/, handlers/, models/", () => {
+    write("components/Button.tsx", "export function Button() {}");
+    write("handlers/userHandler.go", "func GetUser(w http.ResponseWriter, r *http.Request) {}");
+    write("models/user.py", "class User:\n    pass");
+    const idx = indexProject(tmpDir, null);
+    const names = idx.symbols.map((s) => s.name);
+    expect(names).toContain("Button");
+    expect(names).toContain("GetUser");
+    expect(names).toContain("User");
+  });
+
+  test("indexes files in deeply nested dirs", () => {
+    write("src/domain/user/repository/UserRepository.ts",
+      "export class UserRepository { find() {} }");
+    const idx = indexProject(tmpDir, null);
+    expect(idx.symbols.map((s) => s.name)).toContain("UserRepository");
+  });
+
+  test("ignores node_modules, dist, build, .git in any structure", () => {
+    write("src/real.ts", "export function realCode() {}");
+    write("node_modules/lib/index.ts", "export function shouldIgnore() {}");
+    write("dist/bundle.js", "function alsoIgnore() {}");
+    write("build/output.ts", "function ignoreThis() {}");
+    const idx = indexProject(tmpDir, null);
+    const names = idx.symbols.map((s) => s.name);
+    expect(names).toContain("realCode");
+    expect(names).not.toContain("shouldIgnore");
+    expect(names).not.toContain("alsoIgnore");
+    expect(names).not.toContain("ignoreThis");
+  });
+});
+
 describe("indexProject — incremental", () => {
   test("reuses symbols from unchanged files", () => {
     write("src/a.ts", "export function foo() {}");
@@ -108,6 +141,21 @@ describe("indexProject — incremental", () => {
       write("src/b.ts", "export function newFunc() {}");
       const incremental = indexProject(tmpDir, full);
       expect(incremental.symbols.map((s) => s.name)).toContain("newFunc");
+      done();
+    }, 20);
+  });
+
+  test("picks up new file in non-standard dir (components/, handlers/)", (done) => {
+    write("src/a.ts", "export function existing() {}");
+    const full = indexProject(tmpDir, null);
+
+    setTimeout(() => {
+      write("components/NewComponent.tsx", "export function NewComponent() {}");
+      write("handlers/newHandler.go", "func NewHandler() {}");
+      const incremental = indexProject(tmpDir, full);
+      const names = incremental.symbols.map((s) => s.name);
+      expect(names).toContain("NewComponent");
+      expect(names).toContain("NewHandler");
       done();
     }, 20);
   });
