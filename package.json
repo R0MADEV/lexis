@@ -1,0 +1,56 @@
+{
+  "name": "lexis-mcp",
+  "version": "0.2.0",
+  "description": "Lexical + structural code retrieval for LLMs. MCP server compatible with Claude Code, Cursor, Continue, Cline, Goose, Zed, OpenCode, Gemini CLI, and any MCP client.",
+  "main": "dist/cli/main.js",
+  "bin": {
+    "lexis": "dist/cli/main.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x dist/cli/main.js",
+    "dev": "ts-node src/cli/main.ts",
+    "start": "node dist/cli/main.js",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "claude",
+    "claude-code",
+    "llm",
+    "retrieval",
+    "code-search",
+    "ripgrep"
+  ],
+  "author": "R0MADEV",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/R0MADEV/lexis.git"
+  },
+  "homepage": "https://github.com/R0MADEV/lexis#readme",
+  "bugs": {
+    "url": "https://github.com/R0MADEV/lexis/issues"
+  },
+  "type": "commonjs",
+  "devDependencies": {
+    "@types/dotenv": "^6.1.1",
+    "@types/node": "^25.6.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.92.0",
+    "@vscode/ripgrep": "^1.17.1",
+    "commander": "^14.0.3",
+    "dotenv": "^17.4.2",
+    "openai": "^6.35.0"
+  }
+}

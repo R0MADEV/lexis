@@ -1,0 +1,12 @@
+src/
+*.ts
+!dist/**/*.d.ts
+tsconfig.json
+.env
+.env.local
+.env.*.local
+ARCHITECTURE.md
+ARQUITECTURA.md
+CLAUDE.md
+.gitignore
+*.tsbuildinfo
