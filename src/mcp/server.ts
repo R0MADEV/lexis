@@ -2478,6 +2478,29 @@ function buildIndex(resolvedPath: string, previous: Index | null, reason: string
   return idx;
 }
 
+// ── Auto-staleness detection ──────────────────────────────────────────────────
+// Every 30s, scan mtimes of indexed files. If any changed → incremental re-index.
+// Cost: ~1ms for mtime reads on typical projects. Keeps index fresh automatically.
+const STALENESS_CHECK_MS = 30_000;
+let lastStalenessCheck = 0;
+
+function refreshIfStale(current: Index, resolvedPath: string): Index {
+  const now = Date.now();
+  if (now - lastStalenessCheck < STALENESS_CHECK_MS) return current;
+  lastStalenessCheck = now;
+
+  const indexTime = new Date(current.createdAt).getTime();
+  const hasStaleFile = current.files.some((f) => {
+    try { return fs.statSync(f).mtimeMs > indexTime; } catch { return true; }
+  });
+
+  if (!hasStaleFile) return current;
+
+  const updated = buildIndex(resolvedPath, current, "file change detected — auto re-index");
+  toolCache.clear();
+  return updated;
+}
+
 export function startMcpServer(projectPath: string): void {
   const resolvedPath = path.resolve(projectPath);
   log(`[lexis mcp] starting — project: ${resolvedPath}`);
@@ -2555,6 +2578,7 @@ export function startMcpServer(projectPath: string): void {
 
         const toolArgs = p.arguments ?? {};
         try {
+          index = refreshIfStale(index, resolvedPath);
           let result: string;
           if (p.name === "reindex") {
             index = buildIndex(resolvedPath, index, "reindex requested");
