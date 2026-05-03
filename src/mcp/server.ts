@@ -36,6 +36,32 @@ function cacheSet(key: string, value: string): void {
   toolCache.set(key, { value, expires: Date.now() + CACHE_TTL_MS });
 }
 
+// ── Ripgrep resolution ────────────────────────────────────────────────────────
+// @vscode/ripgrep bundles the rg binary — always available after npm install.
+// Falls back to system rg if for some reason the bundled one is missing.
+let _rgPath: string | null | undefined = undefined;
+
+function resolveRg(): string | null {
+  if (_rgPath !== undefined) return _rgPath;
+  try {
+    const { rgPath } = require("@vscode/ripgrep") as { rgPath: string };
+    if (rgPath && fs.existsSync(rgPath)) { _rgPath = rgPath; return rgPath; }
+  } catch { /* not bundled */ }
+  const r = spawnSync("which", ["rg"], { encoding: "utf-8" });
+  const found = r.stdout?.trim();
+  if (found && fs.existsSync(found)) { _rgPath = found; return found; }
+  _rgPath = null;
+  log("[warn] ripgrep not found — search tools will return empty results");
+  return null;
+}
+
+function runRg(args: string[]): { stdout: string; stderr: string } {
+  const rg = resolveRg();
+  if (!rg) return { stdout: "", stderr: "ripgrep not available" };
+  const r = spawnSync(rg, args, { encoding: "utf-8" });
+  return { stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
 // Tools whose results are deterministic given the same args+index — safe to cache.
 // Excluded: read_file (cheap, mtime-sensitive), list_symbols & find_file (already index-only).
 const CACHEABLE = new Set(["search_code", "get_symbol", "find_references", "get_context", "find_writes", "git_context", "recent_changes", "call_chain", "list_entrypoints", "explain", "event_handlers", "impact_analysis", "config_lookup", "interface_implementations", "pattern_search", "tests_for", "hot_files", "dead_code"]);
@@ -1022,16 +1048,7 @@ function execFindWrites(
     projectPath,
   ];
 
-  const rg = spawnSync("rg", rgArgs, { encoding: "utf-8" });
-  // fall back to bundled @vscode/ripgrep
-  let stdout = rg.stdout ?? "";
-  if (rg.status !== 0 && !stdout) {
-    try {
-      const { rgPath } = require("@vscode/ripgrep") as { rgPath: string };
-      const rg2 = spawnSync(rgPath, rgArgs, { encoding: "utf-8" });
-      stdout = rg2.stdout ?? "";
-    } catch { /* ignore */ }
-  }
+  let stdout = runRg(rgArgs).stdout;
 
   if (!stdout.trim()) return `No code found that writes to "${target}".`;
 
@@ -1407,16 +1424,7 @@ function execPatternSearch(
   if (glob) rgArgs.push("--glob", glob);
   rgArgs.push(projectPath);
 
-  let stdout = (spawnSync("rg", rgArgs, { encoding: "utf-8" }).stdout ?? "");
-  let stderr = "";
-  if (!stdout) {
-    try {
-      const { rgPath } = require("@vscode/ripgrep") as { rgPath: string };
-      const r = spawnSync(rgPath, rgArgs, { encoding: "utf-8" });
-      stdout = (r.stdout ?? "");
-      stderr = (r.stderr ?? "");
-    } catch { /* ignore */ }
-  }
+  let { stdout, stderr } = runRg(rgArgs);
 
   if (!stdout.trim()) {
     return stderr.includes("regex parse error")
@@ -1525,13 +1533,7 @@ function execTestsFor(
     "--glob", "!node_modules/**", "--glob", "!vendor/**",
     projectPath,
   ];
-  let stdout = (spawnSync("rg", rgArgs, { encoding: "utf-8" }).stdout ?? "");
-  if (!stdout) {
-    try {
-      const { rgPath } = require("@vscode/ripgrep") as { rgPath: string };
-      stdout = (spawnSync(rgPath, rgArgs, { encoding: "utf-8" }).stdout ?? "");
-    } catch { /* ignore */ }
-  }
+  let stdout = runRg(rgArgs).stdout;
 
   const mentioning = new Map<string, number>();
   for (const line of stdout.split("\n")) {
@@ -1668,14 +1670,7 @@ function execDeadCode(
       "--glob", "!.git/**", "--glob", "!dist/**", "--glob", "!build/**",
       projectPath,
     ];
-    const r = spawnSync("rg", rgArgs, { encoding: "utf-8" });
-    let stdout = r.stdout ?? "";
-    if (!stdout) {
-      try {
-        const { rgPath } = require("@vscode/ripgrep") as { rgPath: string };
-        stdout = (spawnSync(rgPath, rgArgs, { encoding: "utf-8" }).stdout ?? "");
-      } catch { /* ignore */ }
-    }
+    let stdout = runRg(rgArgs).stdout;
 
     let totalHits = 0;
     for (const line of stdout.split("\n")) {
@@ -1774,25 +1769,18 @@ function execConfigLookup(
     "--glob", "!.git/**", "--glob", "!dist/**", "--glob", "!build/**",
   ];
 
-  const runRg = (patterns: string[], extraGlobs: string[]): string => {
+  const searchPatterns = (patterns: string[], extraGlobs: string[]): string => {
     const args = [
       "--line-number", "--no-heading", "--max-filesize", "200K",
       "-e", patterns.join("|"),
       ...extraGlobs,
       projectPath,
     ];
-    let stdout = (spawnSync("rg", args, { encoding: "utf-8" }).stdout ?? "");
-    if (!stdout) {
-      try {
-        const { rgPath } = require("@vscode/ripgrep") as { rgPath: string };
-        stdout = (spawnSync(rgPath, args, { encoding: "utf-8" }).stdout ?? "");
-      } catch { /* ignore */ }
-    }
-    return stdout;
+    return runRg(args).stdout;
   };
 
-  const definitions = runRg(defPatterns, defGlobs);
-  const consumers = runRg(consumePatterns, consumeGlobs);
+  const definitions = searchPatterns(defPatterns, defGlobs);
+  const consumers = searchPatterns(consumePatterns, consumeGlobs);
 
   const projectRoot = path.resolve(projectPath);
   const formatHits = (raw: string, max: number): { lines: string[]; total: number } => {
@@ -1874,13 +1862,7 @@ function execInterfaceImplementations(
     projectPath,
   ];
 
-  let stdout = (spawnSync("rg", rgArgs, { encoding: "utf-8" }).stdout ?? "");
-  if (!stdout) {
-    try {
-      const { rgPath } = require("@vscode/ripgrep") as { rgPath: string };
-      stdout = (spawnSync(rgPath, rgArgs, { encoding: "utf-8" }).stdout ?? "");
-    } catch { /* ignore */ }
-  }
+  let stdout = runRg(rgArgs).stdout;
 
   if (!stdout.trim()) {
     return `No implementations found for "${ifaceName}". May not be an interface, or implementations live outside indexed paths.`;
@@ -1999,13 +1981,7 @@ function execEventHandlers(
     projectPath,
   ];
 
-  let stdout = (spawnSync("rg", rgArgs, { encoding: "utf-8" }).stdout ?? "");
-  if (!stdout) {
-    try {
-      const { rgPath } = require("@vscode/ripgrep") as { rgPath: string };
-      stdout = (spawnSync(rgPath, rgArgs, { encoding: "utf-8" }).stdout ?? "");
-    } catch { /* ignore */ }
-  }
+  let stdout = runRg(rgArgs).stdout;
 
   if (!stdout.trim()) return `No dispatchers or handlers found for event "${event}".`;
 
