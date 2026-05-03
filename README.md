@@ -14,11 +14,7 @@ No vectors. No embeddings. No external servers. Just ripgrep + AST symbol extrac
 npm install -g lexis-mcp
 ```
 
-Or run without installing:
-
-```bash
-npx lexis-mcp setup /path/to/your/project
-```
+That's it — ripgrep is bundled, no extra dependencies needed.
 
 ## Quick start
 
