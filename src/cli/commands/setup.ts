@@ -171,6 +171,12 @@ export async function setupCommand(
     console.log(`Other supported clients: ${CLIENTS.slice(1).map((c) => c.id).join(", ")}`);
     console.log(`Use --client <id> for specific instructions, or --all to print all.`);
   }
+
+  console.log(`\n── Test it ──────────────────────────────────────`);
+  console.log(`Once registered, paste this into your AI client:\n`);
+  console.log(`  Use lexis tools to explore the ${projectName} project.`);
+  console.log(`  Start with list_entrypoints to understand the structure,`);
+  console.log(`  then search_code for anything specific.\n`);
 }
 
 export function listClientsCommand(): void {

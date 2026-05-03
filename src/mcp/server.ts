@@ -4,9 +4,9 @@ import * as path from "path";
 import { spawnSync } from "child_process";
 import { search, getSymbol, findReferences, getContext, suggestSimilar, SearchResult, Suggestion } from "../core/searcher";
 import { QueryIntent, extractTechnicalTerms } from "../core/query-analyzer";
-import { loadIndex } from "../adapters/storage/index-file";
+import { loadIndex, saveIndex } from "../adapters/storage/index-file";
 import { addNote, removeNote, searchNotes } from "../adapters/storage/notes-file";
-import { Index, Symbol as IndexedSymbol } from "../core/indexer";
+import { Index, Symbol as IndexedSymbol, indexProject } from "../core/indexer";
 
 // All diagnostic output goes to stderr so it doesn't corrupt the stdio MCP protocol
 const log = (...args: unknown[]) => process.stderr.write(args.join(" ") + "\n");
@@ -368,6 +368,11 @@ const TOOLS = [
       },
       required: ["id"],
     },
+  },
+  {
+    name: "reindex",
+    description: "Re-scan the project to pick up new or changed files since the last index. Call this if search results seem stale or a recently added file is not found.",
+    inputSchema: { type: "object", properties: {} },
   },
 ];
 
@@ -2464,22 +2469,33 @@ function stableStringify(obj: Record<string, unknown>): string {
   return JSON.stringify(sorted);
 }
 
+function buildIndex(resolvedPath: string, previous: Index | null, reason: string): Index {
+  const t0 = Date.now();
+  log(`[lexis mcp] ${reason} — indexing ${resolvedPath}...`);
+  const idx = indexProject(resolvedPath, previous);
+  saveIndex(idx, resolvedPath);
+  log(`[lexis mcp] indexed ${idx.files.length} files, ${idx.symbols.length} symbols in ${Date.now() - t0}ms`);
+  return idx;
+}
+
 export function startMcpServer(projectPath: string): void {
   const resolvedPath = path.resolve(projectPath);
   log(`[lexis mcp] starting — project: ${resolvedPath}`);
 
-  const index = loadIndex(resolvedPath);
-  if (!index) {
-    log(`[lexis mcp] ERROR: No index found. Run: lexis index ${resolvedPath}`);
-    process.exit(1);
-  }
+  const existing = loadIndex(resolvedPath);
+  let index: Index;
 
-  const ageHours = (Date.now() - new Date(index.createdAt).getTime()) / 3_600_000;
-  if (ageHours > 24) {
-    log(`[lexis mcp] WARNING: Index is ${Math.floor(ageHours)}h old — run 'lexis index <path>' to refresh.`);
+  if (!existing) {
+    index = buildIndex(resolvedPath, null, "no index found");
+  } else {
+    const ageMin = (Date.now() - new Date(existing.createdAt).getTime()) / 60_000;
+    if (ageMin > 60) {
+      index = buildIndex(resolvedPath, existing, `index is ${Math.floor(ageMin)}min old — incremental refresh`);
+    } else {
+      index = existing;
+      log(`[lexis mcp] index loaded — ${index.files.length} files, ${index.symbols.length} symbols`);
+    }
   }
-
-  log(`[lexis mcp] index loaded — ${index.files.length} files, ${index.symbols.length} symbols`);
 
   // Pre-warm cache with queries Claude almost always issues at session start.
   // Runs async after this tick so MCP handshake (initialize) is not blocked.
@@ -2539,7 +2555,14 @@ export function startMcpServer(projectPath: string): void {
 
         const toolArgs = p.arguments ?? {};
         try {
-          const result = dispatchTool(p.name, toolArgs, index, resolvedPath);
+          let result: string;
+          if (p.name === "reindex") {
+            index = buildIndex(resolvedPath, index, "reindex requested");
+            toolCache.clear();
+            result = `Re-indexed: ${index.files.length} files, ${index.symbols.length} symbols. Cache cleared.`;
+          } else {
+            result = dispatchTool(p.name, toolArgs, index, resolvedPath);
+          }
           ok(id, { content: [{ type: "text", text: result }] });
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
