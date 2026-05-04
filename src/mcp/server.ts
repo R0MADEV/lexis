@@ -129,11 +129,16 @@ function buildSessionInstructions(projectPath: string): string {
 
 ## Current branch: ${branch}
 
-You are continuing work on this branch. Read \`notes\` tool for full content.
+You are CONTINUING previous work on this branch. The notes below are your
+own findings from prior sessions — treat them as established facts unless
+you find evidence to update them. Read full content with \`notes\` tool.
 
 ${sections.join("\n\n")}
 
-Save new findings with \`note\` — describe WHAT you discovered and WHY, not what you searched.`;
+Before ending this session: if you discovered the cause, made a decision,
+or ruled out a hypothesis, save it with \`note()\` — see the RULES section
+on when note() is REQUIRED. Do NOT rely on Claude Code's chat history;
+the MCP server cannot read it.`;
 }
 
 const LEXIS_INSTRUCTIONS = `Lexis — lexical + structural code search.
@@ -153,8 +158,35 @@ RULES:
 - For features: use search_code with context='feature' (prioritizes types + patterns)
 - To follow a flow: use call_chain (upstream/downstream)
 - To assess change risk: use impact_analysis before refactoring
-- Save findings with note(content, tags, files) so future sessions don't re-discover them
 - If results seem stale or a recent file is missing, call reindex
+
+CRITICAL — SAVING FINDINGS WITH note():
+
+You MUST call note() in these moments. The MCP server cannot see the
+conversation; if you don't save, the knowledge is lost when the session ends.
+
+When to call note() (REQUIRED):
+1. You identified the root cause of a bug → save a note BEFORE writing the fix.
+   Example: note(content="Bug X comes from Y because Z. The misleading clue
+   was W (rule out — it's actually unrelated).", tags=["bug","root-cause"])
+2. You made a non-obvious design decision → save a note explaining WHY.
+   Example: note(content="Chose Redis over Memcached because we need
+   persistence across restarts.", tags=["decision","arch"])
+3. You ruled out a hypothesis after investigation → save it so future sessions
+   don't re-investigate. Example: note(content="The 'fix-X' branch is misleading
+   — it does NOT solve the listeners.cfg problem; only reloads UAC cache.")
+4. You completed a task → save a final summary with: what was the issue,
+   what was the cause, what was the fix, files changed.
+
+What makes a GOOD note:
+- WHY, not WHAT (you searched). Files+queries are auto-tracked separately.
+- Concrete identifiers: file paths, function names, line numbers, branch names.
+- Negative findings ("X does NOT do Y") are as valuable as positive ones.
+
+What makes a BAD note (DON'T save these):
+- "Started investigating auth flow" — process noise
+- "User asked about X" — meta-commentary
+- "Found UserService class" — facts already in the index
 
 TOKEN BUDGET:
 - snippet (~15 tok) → orient
