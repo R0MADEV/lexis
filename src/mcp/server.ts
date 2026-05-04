@@ -47,8 +47,9 @@ function resolveRg(): string | null {
     const { rgPath } = require("@vscode/ripgrep") as { rgPath: string };
     if (rgPath && fs.existsSync(rgPath)) { _rgPath = rgPath; return rgPath; }
   } catch { /* not bundled */ }
-  const r = spawnSync("which", ["rg"], { encoding: "utf-8" });
-  const found = r.stdout?.trim();
+  const lookup = process.platform === "win32" ? "where" : "which";
+  const r = spawnSync(lookup, ["rg"], { encoding: "utf-8" });
+  const found = r.stdout?.split(/\r?\n/)[0]?.trim();
   if (found && fs.existsSync(found)) { _rgPath = found; return found; }
   _rgPath = null;
   log("[warn] ripgrep not found — search tools will return empty results");

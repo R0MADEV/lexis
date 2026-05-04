@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { migrateIfNeeded } from "../adapters/storage/paths";
+import { migrateIfNeeded, indexFilePath, notesFilePath, projectStorageDir } from "../adapters/storage/paths";
 
 let tmpDir: string;
 
@@ -42,5 +42,33 @@ describe("migrateIfNeeded", () => {
     expect(result).toBe(true);
     expect(fs.existsSync(legacy)).toBe(false);
     expect(fs.readFileSync(central, "utf-8")).toBe("new");
+  });
+});
+
+describe("project storage paths", () => {
+  test("different projects map to different storage dirs", () => {
+    const a = projectStorageDir(path.join(tmpDir, "project-a"));
+    const b = projectStorageDir(path.join(tmpDir, "project-b"));
+    expect(a).not.toBe(b);
+  });
+
+  test("same project always maps to same storage dir", () => {
+    const projectPath = path.join(tmpDir, "myproject");
+    const first = projectStorageDir(projectPath);
+    const second = projectStorageDir(projectPath);
+    expect(first).toBe(second);
+  });
+
+  test("storage dir is created on demand outside the project", () => {
+    const projectPath = path.join(tmpDir, "outside-project");
+    const storage = projectStorageDir(projectPath);
+    expect(fs.existsSync(storage)).toBe(true);
+    expect(storage.startsWith(projectPath)).toBe(false);
+  });
+
+  test("indexFilePath and notesFilePath live in the same project dir", () => {
+    const projectPath = path.join(tmpDir, "shared");
+    expect(path.dirname(indexFilePath(projectPath)))
+      .toBe(path.dirname(notesFilePath(projectPath)));
   });
 });

@@ -691,10 +691,11 @@ function findRipgrep(): string | null {
     // package not available — fall through to system lookup
   }
 
-  // 2. system lookup via `which rg`
-  const whichResult = spawnSync("which", ["rg"], { encoding: "utf-8" });
+  // 2. system lookup via `which`/`where`
+  const lookup = process.platform === "win32" ? "where" : "which";
+  const whichResult = spawnSync(lookup, ["rg"], { encoding: "utf-8" });
   if (whichResult.status === 0) {
-    const found = (whichResult.stdout ?? "").trim().split("\n").find((p) => p && !p.includes(" "));
+    const found = (whichResult.stdout ?? "").trim().split(/\r?\n/).find((p) => p && !p.includes(" "));
     if (found) {
       const verify = spawnSync(found, ["--version"], { stdio: "ignore" });
       if (verify.status === 0) {
@@ -705,13 +706,20 @@ function findRipgrep(): string | null {
   }
 
   // 3. fallback to common install paths
-  const candidates = [
-    "/opt/homebrew/bin/rg",
-    "/usr/local/bin/rg",
-    "/usr/bin/rg",
-    `${process.env["HOME"]}/.cargo/bin/rg`,
-    `${process.env["HOME"]}/.local/bin/rg`,
-  ];
+  const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
+  const candidates = process.platform === "win32"
+    ? [
+        `${process.env["ProgramFiles"]}\\ripgrep\\rg.exe`,
+        `${home}\\scoop\\shims\\rg.exe`,
+        `${process.env["ChocolateyInstall"]}\\bin\\rg.exe`,
+      ]
+    : [
+        "/opt/homebrew/bin/rg",
+        "/usr/local/bin/rg",
+        "/usr/bin/rg",
+        `${home}/.cargo/bin/rg`,
+        `${home}/.local/bin/rg`,
+      ];
 
   for (const rg of candidates) {
     const result = spawnSync(rg, ["--version"], { stdio: "ignore" });
