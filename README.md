@@ -176,6 +176,92 @@ Honest comparison — not every MCP is trying to do the same thing.
 
 ---
 
+## Persistent memory across sessions
+
+Lexis remembers context between sessions through **notes** — markdown files
+auto-organized by git branch. When you open Claude Code on a feature/bug
+branch, Lexis injects the relevant past notes directly into the AI's
+instructions, so it inherits your previous conclusions without you typing them.
+
+### Folder structure
+
+Notes are categorized automatically by the current branch name:
+
+```
+~/.lexis/projects/<your-project>/
+  bugs/
+    fix-PROVIDER-2419.md
+    PROVIDER-2530-kamailio-fantasma.md
+  features/
+    feature-X-Info-DDI-Prefix.md
+    feature-new-billing-flow.md
+  others/
+    no-branch.md          ← when not in a git repo
+    legacy-notes.md       ← migration of pre-0.6.0 flat notes
+```
+
+| Branch pattern | Goes to |
+|---|---|
+| `fix/...`, `bugfix/...`, `hotfix/...`, `PROVIDER-1234`, `JIRA-...` | `bugs/` |
+| `feature/...`, `feat/...` | `features/` |
+| `main`, `master`, `develop` | **No notes saved** (active work hasn't started) |
+| Anything else | `others/` |
+
+### Two types of notes
+
+**1. Manual notes** — created when Claude or you call `note(content, tags, files)`.
+These hold curated knowledge: root causes, design decisions, ruled-out hypotheses.
+Strong MCP instructions push Claude to save these at decisive moments.
+
+```markdown
+## 2026-05-04 18:49 · mch8wy
+**Branch:** fix/PROVIDER-2419
+**Tags:** kamailio, root-cause, bug
+
+The fix-PROVIDER-2419 branch is misleading — it does NOT regenerate
+listeners.cfg. Only reloads the UAC cache via reloadUacReg(). The
+listeners.cfg file is written by the autoconf Perl script, only at
+service startup, not at runtime.
+```
+
+**2. Auto-session log** — written by Lexis automatically when the MCP server
+shuts down (Claude Code closes, Ctrl+C, SIGTERM, or unexpected crash). Captures
+mechanical activity: queries searched, symbols inspected, files read. Zero AI
+involvement, zero tokens consumed.
+
+```markdown
+## 2026-05-04 22:30 · auto-x9j2
+**Branch:** feature/X-Info-DDI-Prefix
+**Tags:** auto-session
+
+Duration: 47 min · 43 tool calls
+
+**Searched:** `kamailio.cfg`, `DdiAction`, `X-Info-DDI-Prefix`
+**Symbols inspected:** UserAgent, route[GET_DDI_PREFIX]
+**Files read:**
+- asterisk/agi/src/Agi/Action/DdiAction.php
+- kamailio/users/config/kamailio.cfg
+```
+
+### When notes are loaded
+
+- **Session start (`initialize`)**: Lexis detects the current git branch, loads
+  the corresponding notes file, and injects up to 5 manual notes + 2 auto-session
+  logs into the MCP `instructions` field. Claude sees them on first response,
+  no manual recall needed.
+- **On demand**: `notes(query)` searches across all branches and categories.
+
+### Caveats and limits
+
+- Notes are saved on graceful shutdown (close, SIGINT, SIGTERM, SIGHUP).
+  `kill -9` or sudden power loss may drop the auto-session log of that session.
+- Manual notes are saved immediately when `note()` is called, so they survive
+  any kind of shutdown.
+- Notes belong to YOUR machine — they live in `~/.lexis/`, never in the repo,
+  never synced anywhere unless you choose to.
+
+---
+
 ## Storage
 
 Everything lives in `~/.lexis/` — **never** inside your project repo:
@@ -184,11 +270,15 @@ Everything lives in `~/.lexis/` — **never** inside your project repo:
 ~/.lexis/
   projects/
     Users-you-myproject/
-      index.json      ← symbol index (~300 KB for 1500 symbols)
-      notes.md        ← persistent notes, human-readable markdown
+      index.json        ← symbol index (~300 KB for 1500 symbols)
+      bugs/             ← see "Persistent memory" above
+      features/
+      others/
 ```
 
-The index migrates automatically if a legacy `.lexis-index.json` is found inside the project.
+The index migrates automatically if a legacy `.lexis-index.json` is found inside
+the project. Likewise, pre-0.6.0 flat `notes.md` is migrated to
+`others/legacy-notes.md` on first access — no data loss.
 
 ---
 
