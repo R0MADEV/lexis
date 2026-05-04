@@ -66,7 +66,7 @@ function runRg(args: string[]): { stdout: string; stderr: string } {
 
 // Tools whose results are deterministic given the same args+index — safe to cache.
 // Excluded: read_file (cheap, mtime-sensitive), list_symbols & find_file (already index-only).
-const CACHEABLE = new Set(["search_code", "get_symbol", "find_references", "get_context", "find_writes", "git_context", "recent_changes", "call_chain", "list_entrypoints", "explain", "event_handlers", "impact_analysis", "config_lookup", "interface_implementations", "pattern_search", "tests_for", "hot_files", "dead_code", "investigate", "list_todos", "resolve_import"]);
+const CACHEABLE = new Set(["search_code", "get_symbol", "find_references", "get_context", "find_writes", "git_context", "recent_changes", "call_chain", "list_entrypoints", "explain", "event_handlers", "impact_analysis", "config_lookup", "interface_implementations", "pattern_search", "tests_for", "hot_files", "dead_code", "investigate", "list_todos", "resolve_import", "outline"]);
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -502,6 +502,17 @@ const TOOLS = [
     },
   },
   {
+    name: "outline",
+    description: "Show only signatures (class/function/method headers) of a file without bodies. Lets you understand the API of a file in ~10x less tokens than read_file. Use this when you need to know WHAT a file exposes, not HOW it implements it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", description: "File path (relative or absolute)" },
+      },
+      required: ["file"],
+    },
+  },
+  {
     name: "list_todos",
     description: "List all TODO, FIXME, XXX, HACK markers in the project. Use to triage technical debt or check pending items in a specific area. Optional path_filter to narrow scope.",
     inputSchema: {
@@ -881,6 +892,16 @@ function execReadFile(
 
   log(`[read_file] "${resolved}" lines ${offset}-${offset + limit - 1}`);
 
+  // In-session dedup: if Claude already pulled this exact range, return a
+  // tiny marker instead of the full content.
+  const dedupKey = readRangeKey(resolved, offset, limit);
+  if (shownReadRanges.has(dedupKey)) {
+    const rel = path.relative(projectResolved, resolved);
+    return `[already shown earlier this session] ${rel} lines ${offset}-${offset + limit - 1}. ` +
+           `Re-read with a different offset if you need fresh content.`;
+  }
+  shownReadRanges.add(dedupKey);
+
   try {
     const content = fs.readFileSync(resolved, "utf-8");
     const allLines = content.split("\n");
@@ -893,24 +914,17 @@ function execReadFile(
       .map((line, i) => `${(startIdx + i + 1).toString().padStart(6, " ")}\t${line}`)
       .join("\n");
 
-    // Find enclosing symbol chain. lineEnd in the index is approximate (lineStart+20),
-    // so anchor on lineStart and pick the symbol whose start is closest to (but ≤) offset.
-    const fileSymbols = index.symbols.filter((s) => s.file === resolved);
-    const containingClass = fileSymbols
-      .filter((s) => s.type === "class" && s.lineStart <= offset)
-      .sort((a, b) => b.lineStart - a.lineStart)[0];
-    const containingFn = fileSymbols
-      .filter((s) => (s.type === "function" || s.type === "method") && s.lineStart <= offset)
-      .sort((a, b) => b.lineStart - a.lineStart)[0];
+    // Find enclosing class + method by walking backwards from `offset` looking
+    // for signature lines. Capture the FULL signature (multi-line if needed)
+    // so Claude knows the params/return types without a separate get_symbol call.
+    const enclosingSigs = findEnclosingSignatures(allLines, offset);
 
     const relPath = path.relative(projectResolved, resolved);
     let contextLine = "";
-    const chain: string[] = [];
-    if (containingClass) chain.push(`${containingClass.name} [class]`);
-    if (containingFn && (!containingClass || containingFn.lineStart > containingClass.lineStart)) {
-      chain.push(`${containingFn.name} [${containingFn.type}]`);
+    if (enclosingSigs.length > 0) {
+      const sigText = enclosingSigs.map((s) => `  ${s}`).join("\n");
+      contextLine = `INSIDE:\n${sigText}\n\n`;
     }
-    if (chain.length > 0) contextLine = `INSIDE: ${chain.join(" › ")}\n`;
 
     const header = `FILE: ${relPath} (showing lines ${offset}-${endIdx} of ${totalLines})\n${contextLine}`;
     const footer =
@@ -921,6 +935,45 @@ function execReadFile(
   } catch {
     return `Could not read file: ${resolved}`;
   }
+}
+
+// Walk backwards from `offset` looking for class/function/method signature
+// lines that visually enclose the cursor. Returns the OUTER signature first,
+// inner-most last (e.g. ["class Foo {", "  async bar(): Promise<X> {"]).
+//
+// Approach: look at indentation levels. A signature at indent level N encloses
+// everything at indent > N below it. Stop at the file top or when we find an
+// outer-level (indent 0) class/function whose body the cursor falls in.
+function findEnclosingSignatures(lines: string[], offset: number): string[] {
+  const SIG_RE = /^(\s*)(export\s+|public\s+|private\s+|protected\s+|static\s+|async\s+|abstract\s+|default\s+|pub\s+|suspend\s+|override\s+|readonly\s+|final\s+)*(class\s+\w|interface\s+\w|trait\s+\w|struct\s+\w|enum\s+\w|function\s+\w|fn\s+\w|func\s+\w|def\s+\w|sub\s+\w|defmodule\s+\w|module\s+\w|defp\s+\w|defmacro\s+\w|\w+\s*\([^)]*\)\s*[:{])/;
+
+  // Reverse scan: collect candidate signatures with their indent
+  const found: Array<{ line: string; indent: number; lineNum: number }> = [];
+  for (let i = Math.min(offset - 1, lines.length - 1); i >= 0; i--) {
+    const l = lines[i] ?? "";
+    const m = l.match(SIG_RE);
+    if (!m) continue;
+    const indent = (m[1] ?? "").length;
+    // Only keep this if its indent is strictly less than the most recent kept
+    // (otherwise it's a sibling, not an enclosing scope)
+    if (found.length === 0 || indent < found[found.length - 1]!.indent) {
+      // Multi-line signature: extend forward if it wraps
+      const sigLines: string[] = [l.trimEnd()];
+      let j = i;
+      while (j < lines.length - 1) {
+        const t = (sigLines[sigLines.length - 1] ?? "").trim();
+        if (t.endsWith("{") || t.endsWith(":") || /[=]>\s*\{?\s*$/.test(t)) break;
+        if (!t.endsWith(",") && !t.endsWith("(")) break;
+        j++;
+        sigLines.push((lines[j] ?? "").trimEnd());
+        if (sigLines.length >= 4) break;
+      }
+      found.push({ line: sigLines.join(" ").replace(/\s+/g, " ").trim().slice(0, 200), indent, lineNum: i + 1 });
+      if (indent === 0) break;  // outermost reached
+    }
+  }
+
+  return found.reverse().map((f) => f.line);
 }
 
 // If a single read_file response exceeds the budget, cut it in the middle
@@ -1193,6 +1246,22 @@ function globToRegex(glob: string): RegExp {
 // Run the project's native linter/typechecker. Detects which by marker file
 // (tsconfig.json, go.mod, Cargo.toml, etc.) so it works across languages
 // without configuration.
+// In-session "already shown" tracking. When Claude calls read_file twice for
+// the same exact range, the second call returns a tiny marker instead of the
+// full content again — saves ~2-5k tokens on iterative debugging sessions.
+//
+// State lives at module level (one MCP server = one session); cleared by
+// resetSessionState() (used by tests; production sessions never call it).
+const shownReadRanges = new Set<string>();
+
+export function resetSessionState(): void {
+  shownReadRanges.clear();
+}
+
+function readRangeKey(path: string, offset: number, limit: number): string {
+  return `${path}:${offset}:${limit}`;
+}
+
 // Hide tools that don't apply to the current project from `tools/list`.
 // Saves Claude a wasted call when, e.g., `lint` is invoked on a project
 // without a linter marker file. Keeps the tool list contextually relevant.
@@ -1331,6 +1400,87 @@ function execResolveImport(
   const relDef = path.relative(projectRoot, def.symbol.file);
   const lineCount = def.body.split("\n").length;
   return `IMPORTED IN: ${path.relative(projectRoot, resolvedFile)}\nDEFINED IN: ${relDef}:${def.symbol.lineStart}-${def.symbol.lineStart + lineCount - 1} [${def.symbol.type}]\n\n\`\`\`\n${def.body}\n\`\`\``;
+}
+
+// Outline a file: print signatures only, no bodies. ~10x cheaper than read_file
+// when you just want to know what a file exposes.
+//
+// Detects signatures directly from the file (rather than only from the index)
+// so methods inside classes — which the indexer doesn't capture as top-level
+// symbols — also show up. Independent of language: matches any line that
+// "looks like a definition" by universal patterns.
+function execOutline(
+  args: Record<string, unknown>,
+  _index: Index,
+  projectPath: string
+): string {
+  const file = args["file"] as string;
+  if (!file) return "Error: 'file' is required.";
+
+  const projectRoot = path.resolve(projectPath);
+  const resolved = path.isAbsolute(file) ? file : path.resolve(projectRoot, file);
+
+  let lines: string[];
+  try { lines = fs.readFileSync(resolved, "utf-8").split("\n"); }
+  catch { return `File not found or unreadable: ${file}`; }
+
+  // Universal signature detector — matches any line that introduces a class,
+  // function, or method across most languages. Conservative on purpose: prefer
+  // false negatives (missed sig) over false positives (body line treated as sig).
+  const SIGNATURE_PATTERNS: Array<{ re: RegExp; kind: string }> = [
+    { re: /^\s*(export\s+)?(default\s+)?(abstract\s+|async\s+)*class\s+\w+/, kind: "class" },
+    { re: /^\s*(export\s+)?interface\s+\w+/, kind: "interface" },
+    { re: /^\s*(export\s+)?(type|enum)\s+\w+/, kind: "type" },
+    { re: /^\s*(export\s+)?(default\s+)?(async\s+)?function\s+\w+/, kind: "function" },
+    { re: /^\s*(public|private|protected|static|async|readonly|abstract|override)?\s*(public|private|protected|static|async|readonly|abstract|override)?\s*\w+\s*\([^)]*\)\s*[:{]/, kind: "method" },
+    { re: /^\s*(pub\s+(\(\w+\)\s+)?)?(async\s+)?fn\s+\w+/, kind: "function" },                           // Rust
+    { re: /^\s*(pub\s+(\(\w+\)\s+)?)?(struct|enum|trait|impl)\s+\w+/, kind: "type" },                    // Rust
+    { re: /^\s*func\s+(\(\s*\w+\s+[^)]+\)\s+)?\w+\s*\(/, kind: "function" },                             // Go
+    { re: /^\s*type\s+\w+\s+(struct|interface)/, kind: "type" },                                          // Go
+    { re: /^\s*(async\s+)?def\s+\w+\s*\(/, kind: "function" },                                            // Python
+    { re: /^\s*class\s+\w+/, kind: "class" },                                                             // Python (also TS/Ruby etc.)
+    { re: /^\s*defmodule\s+[\w.]+/, kind: "module" },                                                     // Elixir
+    { re: /^\s*(def|defp|defmacro)\s+\w+/, kind: "function" },                                            // Elixir
+    { re: /^\s*sub\s+\w+/, kind: "function" },                                                            // Perl
+    { re: /^\s*module\s+\w+/, kind: "module" },                                                           // Ruby/Elixir
+  ];
+
+  const out: string[] = [];
+
+  // Skip these even if they technically match — they're not signatures
+  const SKIP = /^\s*(if|else|for|while|switch|catch|try|return|new|throw|do)\b/;
+
+  // Filter out duplicate matches: if two patterns match the same line, count once.
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (line.length === 0 || line.length > 300) continue;
+    if (SKIP.test(line)) continue;
+
+    for (const { re, kind } of SIGNATURE_PATTERNS) {
+      if (!re.test(line)) continue;
+      // Multi-line signature handling — extend if it wraps
+      const sigLines: string[] = [line.trimEnd()];
+      let j = i;
+      while (j < lines.length - 1) {
+        const t = (sigLines[sigLines.length - 1] ?? "").trim();
+        if (t.endsWith("{") || t.endsWith(":") || /[=]>\s*\{?\s*$/.test(t)) break;
+        if (!t.endsWith(",") && !t.endsWith("(")) break;
+        j++;
+        sigLines.push((lines[j] ?? "").trimEnd());
+        if (sigLines.length >= 4) break;
+      }
+      const sig = sigLines.join("\n").trimStart().slice(0, 240);
+      out.push(`  ${(i + 1).toString().padStart(4)}  [${kind}] ${sig}`);
+      break;  // only one kind per line
+    }
+  }
+
+  if (out.length === 0) {
+    return `No signatures detected in ${path.relative(projectRoot, resolved)} (${lines.length} lines). File may have unsupported syntax.`;
+  }
+
+  const header = `FILE: ${path.relative(projectRoot, resolved)} (${lines.length} lines, ${out.length} signatures)\n`;
+  return header + out.join("\n");
 }
 
 // List TODO/FIXME/XXX/HACK markers via ripgrep. Compact output: file:line text.
@@ -3155,6 +3305,7 @@ export function dispatchTool(
     case "forget":           result = execForget(args, projectPath); break;
     case "investigate":      result = execInvestigate(args, index, projectPath); break;
     case "list_todos":       result = execListTodos(args, projectPath); break;
+    case "outline":          result = execOutline(args, index, projectPath); break;
     case "resolve_import":   result = execResolveImport(args, index, projectPath); break;
     case "lint":             result = execLint(args, projectPath); break;
     default:                 return `Unknown tool: ${name}`;

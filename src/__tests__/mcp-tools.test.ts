@@ -407,6 +407,149 @@ describe("dispatchTool — resolve_import (multi-language)", () => {
   });
 });
 
+describe("dispatchTool — read_file shows enclosing signature", () => {
+  test("includes enclosing class+method signatures, not just names", () => {
+    const lines = [
+      "export class PaymentProcessor {",                                    // 1
+      "  constructor(private gateway: Gateway, private db: Database) {}",   // 2
+      "",                                                                    // 3
+      "  async charge(amount: number, customer: Customer): Promise<Receipt> {", // 4
+      "    const validated = this.validate(amount);",                       // 5
+      "    if (!validated) throw new Error('invalid');",                    // 6
+      "    return this.gateway.process(amount, customer);",                 // 7
+      "  }",                                                                 // 8
+      "",                                                                    // 9
+      "  refund(receiptId: string): Promise<void> {",                       // 10
+      "    return this.gateway.reverse(receiptId);",                        // 11
+      "  }",                                                                 // 12
+      "}",                                                                   // 13
+    ].join("\n");
+    write("src/payments.ts", lines);
+    const idx = indexProject(tmpDir, null);
+    const { resetSessionState } = require("../mcp/server");
+    if (resetSessionState) resetSessionState();
+
+    // Read inside the `charge` method
+    const result = dispatchTool("read_file", { path: "src/payments.ts", offset: 5, limit: 3 }, idx, tmpDir);
+    // Should show the FULL signature of charge, not just its name
+    expect(result).toMatch(/class PaymentProcessor/);
+    expect(result).toMatch(/async charge.*amount.*customer.*Receipt/);
+  });
+});
+
+describe("dispatchTool — in-session deduplication", () => {
+  test("read_file returns full content first time, marks as already-shown second time", () => {
+    const content = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n");
+    write("src/big.ts", content);
+    const idx = indexProject(tmpDir, null);
+    // Reset session-level dedup state for a clean test
+    const { resetSessionState } = require("../mcp/server");
+    if (resetSessionState) resetSessionState();
+
+    const first = dispatchTool("read_file", { path: "src/big.ts", offset: 1, limit: 10 }, idx, tmpDir);
+    expect(first).toContain("line 1");
+    expect(first).toContain("line 10");
+
+    const second = dispatchTool("read_file", { path: "src/big.ts", offset: 1, limit: 10 }, idx, tmpDir);
+    // Should mention that this range was already shown
+    expect(second.toLowerCase()).toMatch(/already shown|previously read|already read/);
+    // And should be much shorter than the original (just a marker, not the lines)
+    expect(second.length).toBeLessThan(first.length / 2);
+  });
+
+  test("different ranges of same file are NOT deduplicated", () => {
+    const content = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
+    write("src/big.ts", content);
+    const idx = indexProject(tmpDir, null);
+    const { resetSessionState } = require("../mcp/server");
+    if (resetSessionState) resetSessionState();
+
+    const first = dispatchTool("read_file", { path: "src/big.ts", offset: 1, limit: 10 }, idx, tmpDir);
+    const second = dispatchTool("read_file", { path: "src/big.ts", offset: 20, limit: 10 }, idx, tmpDir);
+    // Different range → full content, not the "already shown" marker
+    expect(second).toContain("line 20");
+    expect(second).toContain("line 29");
+  });
+});
+
+describe("dispatchTool — outline", () => {
+  test("returns class/function signatures without bodies", () => {
+    const fileContent = `
+import { Foo } from "./foo";
+
+export class PaymentProcessor {
+  constructor(private gateway: Gateway) {
+    this.client = new Client();
+    // many lines here...
+  }
+
+  async charge(amount: number, customer: Customer): Promise<Receipt> {
+    const validated = this.validate(amount);
+    if (!validated) throw new Error("invalid");
+    return this.gateway.process(amount, customer);
+  }
+
+  refund(receiptId: string): Promise<void> {
+    return this.gateway.reverse(receiptId);
+  }
+
+  private validate(input: PaymentInput): boolean {
+    return input.amount > 0;
+  }
+}
+
+export function helper(x: number): number {
+  return x * 2;
+}
+`;
+    write("src/payments.ts", fileContent);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("outline", { file: "src/payments.ts" }, idx, tmpDir);
+
+    expect(result).toContain("PaymentProcessor");
+    expect(result).toContain("charge");
+    expect(result).toContain("refund");
+    expect(result).toContain("validate");
+    expect(result).toContain("helper");
+    // Must NOT contain body lines
+    expect(result).not.toContain("this.client = new Client()");
+    expect(result).not.toContain("throw new Error");
+    expect(result).not.toContain("input.amount > 0");
+    // Must be smaller than the original (the whole point — no bodies)
+    expect(result.length).toBeLessThan(fileContent.length);
+  });
+
+  test("handles non-existent file gracefully", () => {
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("outline", { file: "src/missing.ts" }, idx, tmpDir);
+    expect(result.toLowerCase()).toMatch(/not found|no symbols|cannot/);
+  });
+
+  test("works for any indexed language (Python)", () => {
+    write("app/models.py", `
+class User:
+    def __init__(self, name: str):
+        self.name = name
+        self.created_at = datetime.now()
+
+    def login(self, password: str) -> bool:
+        if not password:
+            return False
+        return True
+
+def hash_password(plain: str) -> str:
+    return hashlib.sha256(plain.encode()).hexdigest()
+`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("outline", { file: "app/models.py" }, idx, tmpDir);
+    expect(result).toContain("User");
+    expect(result).toContain("login");
+    expect(result).toContain("hash_password");
+    expect(result).not.toContain("self.name = name");
+    expect(result).not.toContain("hashlib.sha256");
+  });
+});
+
 describe("dispatchTool — list_todos", () => {
   test("finds TODO, FIXME, XXX, HACK markers across the project", () => {
     write("src/a.ts", "// TODO: implement caching\nexport function x() {}");
