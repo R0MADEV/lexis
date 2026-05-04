@@ -75,6 +75,45 @@ describe("removeNote", () => {
   });
 });
 
+describe("branch-based categorization", () => {
+  function initGitRepo(dir: string, branch: string) {
+    const child = require("child_process");
+    child.spawnSync("git", ["init", "-q", "-b", branch, dir]);
+    // git rev-parse --abbrev-ref HEAD only returns the branch after the first commit;
+    // an empty repo reports "HEAD". Create a dummy commit so detectBranch works.
+    child.spawnSync("git", ["-C", dir, "config", "user.email", "test@test.com"]);
+    child.spawnSync("git", ["-C", dir, "config", "user.name", "test"]);
+    fs.writeFileSync(path.join(dir, ".init"), "x");
+    child.spawnSync("git", ["-C", dir, "add", "."]);
+    child.spawnSync("git", ["-C", dir, "commit", "-q", "-m", "init"]);
+  }
+
+  test("note in fix/* branch goes to bugs/", () => {
+    initGitRepo(tmpDir, "fix/PROVIDER-2419");
+    addNote(tmpDir, "Found root cause in TrunksClient", ["bug"]);
+    const slug = tmpDir.replace(/^\/+|\/+$/g, "").replace(/[\/\\]/g, "-").replace(/[^A-Za-z0-9._-]/g, "_");
+    const bugsDir = path.join(os.homedir(), ".lexis", "projects", slug, "bugs");
+    expect(fs.existsSync(bugsDir)).toBe(true);
+    const filesIn = fs.readdirSync(bugsDir);
+    expect(filesIn.some((f: string) => f.includes("fix-PROVIDER-2419"))).toBe(true);
+  });
+
+  test("note in feature/* branch goes to features/", () => {
+    initGitRepo(tmpDir, "feature/auth-flow");
+    addNote(tmpDir, "Auth uses sessions in Redis", ["arch"]);
+    const slug = tmpDir.replace(/^\/+|\/+$/g, "").replace(/[\/\\]/g, "-").replace(/[^A-Za-z0-9._-]/g, "_");
+    const featuresDir = path.join(os.homedir(), ".lexis", "projects", slug, "features");
+    expect(fs.existsSync(featuresDir)).toBe(true);
+  });
+
+  test("note without git repo goes to others/no-branch.md", () => {
+    addNote(tmpDir, "Note in non-git dir for testing", []);
+    const slug = tmpDir.replace(/^\/+|\/+$/g, "").replace(/[\/\\]/g, "-").replace(/[^A-Za-z0-9._-]/g, "_");
+    const file = path.join(os.homedir(), ".lexis", "projects", slug, "others", "no-branch.md");
+    expect(fs.existsSync(file)).toBe(true);
+  });
+});
+
 describe("searchNotes", () => {
   beforeEach(() => {
     addNote(tmpDir, "Kamailio reload bug", ["kamailio", "bug"], ["src/kamailio.ts"]);

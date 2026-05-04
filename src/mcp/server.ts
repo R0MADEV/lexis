@@ -5,7 +5,7 @@ import { spawnSync } from "child_process";
 import { search, getSymbol, findReferences, getContext, suggestSimilar, SearchResult, Suggestion } from "../core/searcher";
 import { QueryIntent, extractTechnicalTerms } from "../core/query-analyzer";
 import { loadIndex, saveIndex } from "../adapters/storage/index-file";
-import { addNote, removeNote, searchNotes } from "../adapters/storage/notes-file";
+import { addNote, removeNote, searchNotes, loadNotesForCurrentBranch, detectBranch, isMainBranch } from "../adapters/storage/notes-file";
 import { Index, Symbol as IndexedSymbol, indexProject } from "../core/indexer";
 
 // All diagnostic output goes to stderr so it doesn't corrupt the stdio MCP protocol
@@ -88,6 +88,37 @@ function ok(id: number | string | null, result: unknown): void {
 
 function err(id: number | string | null, code: number, message: string): void {
   send({ jsonrpc: "2.0", id, error: { code, message } });
+}
+
+// Build the MCP `instructions` field returned at `initialize`. If the user is
+// currently on a feature/bug branch with prior notes, the notes are appended
+// so Claude inherits past context without having to ask for it.
+function buildSessionInstructions(projectPath: string): string {
+  const branch = detectBranch(projectPath);
+
+  if (!branch || isMainBranch(branch)) {
+    return LEXIS_INSTRUCTIONS;
+  }
+
+  const notes = loadNotesForCurrentBranch(projectPath);
+  if (notes.length === 0) return LEXIS_INSTRUCTIONS;
+
+  // Newest 5 notes — most recent context first
+  const recent = notes.slice(-5).reverse();
+  const noteLines = recent.map((n) => {
+    const date = n.createdAt.slice(0, 10);
+    const summary = n.content.split("\n")[0]?.slice(0, 200) ?? "";
+    return `- ${date} (${n.id}): ${summary}`;
+  }).join("\n");
+
+  return `${LEXIS_INSTRUCTIONS}
+
+## Current branch: ${branch}
+
+You are continuing work on this branch. Past findings (most recent first):
+${noteLines}
+
+Use \`notes\` tool to read the full text of any of these. Save new findings with \`note\`.`;
 }
 
 const LEXIS_INSTRUCTIONS = `Lexis — lexical + structural code search.
@@ -2855,8 +2886,8 @@ export function startMcpServer(projectPath: string): void {
         ok(id, {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "lexis", version: "0.2.0" },
-          instructions: LEXIS_INSTRUCTIONS,
+          serverInfo: { name: "lexis", version: "0.5.1" },
+          instructions: buildSessionInstructions(resolvedPath),
         });
         break;
 

@@ -6,7 +6,6 @@ const LEXIS_HOME = path.join(os.homedir(), ".lexis");
 const PROJECTS_DIR = path.join(LEXIS_HOME, "projects");
 
 // Convert an absolute project path to a directory-safe slug.
-// /Users/romangomez/Desktop/irontec/ivozprovider → Users-romangomez-Desktop-irontec-ivozprovider
 function slugify(projectPath: string): string {
   const abs = path.resolve(projectPath);
   return abs

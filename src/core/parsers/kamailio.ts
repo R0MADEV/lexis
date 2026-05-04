@@ -1,5 +1,5 @@
 // Kamailio (.cfg) — SIP proxy/router. Routes are the unit of abstraction,
-// equivalent to functions in code: ivozprovider, FreeSWITCH-Kamailio bridges,
+// equivalent to functions in code: FreeSWITCH-Kamailio bridges,
 // VoIP backends, etc.
 //
 // Examples:

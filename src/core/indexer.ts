@@ -48,7 +48,7 @@ const SUPPORTED_EXTENSIONS = new Set([
   ".sh", ".bash", ".zsh",
   // Perl
   ".pl", ".pm",
-  // Telecom DSLs — common in voip/telephony backends (ivozprovider, asterisk, kamailio)
+  // Telecom DSLs — common in voip/telephony backends
   ".cfg",   // Kamailio main config (route[], failure_route[], etc.)
   ".conf",  // Asterisk dialplan ([context], exten => ...)
 ]);
