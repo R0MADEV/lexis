@@ -76,6 +76,47 @@ type Server struct{}
     expect(names).toContain("Server");
   });
 
+  test("indexes Kamailio routes natively", () => {
+    write("kamailio/users/config/kamailio.cfg", `
+route[GET_DDI_PREFIX] {
+  if (search("@.*\\\\*")) {
+    xlog("found prefix");
+  }
+}
+
+failure_route[MANAGE_FAILURE] {
+  xlog("call failed");
+}
+
+onreply_route[HANDLE_REPLY] {
+  xlog("reply");
+}
+`);
+    const idx = indexProject(tmpDir, null);
+    const names = idx.symbols.map((s) => s.name);
+    expect(names).toContain("GET_DDI_PREFIX");
+    expect(names).toContain("MANAGE_FAILURE");
+    expect(names).toContain("HANDLE_REPLY");
+  });
+
+  test("indexes Asterisk dialplan contexts natively", () => {
+    write("asterisk/config/dialplan/default.conf", `
+[from-internal]
+exten => _X.,1,Goto(globals,s,1)
+
+[outbound-routes]
+exten => _X.,1,NoOp()
+
+[add-headers-users]
+same => n,Set(PJSIP_HEADER(add,X-Info-DDI-Prefix)=12)
+`);
+    const idx = indexProject(tmpDir, null);
+    const names = idx.symbols.map((s) => s.name);
+    expect(names).toContain("from-internal");
+    expect(names).toContain("outbound-routes");
+    expect(names).toContain("add-headers-users");
+  });
+
   test("createdAt is set", () => {
     write("a.ts", "const x = 1;");
     const idx = indexProject(tmpDir, null);

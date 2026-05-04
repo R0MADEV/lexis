@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { ALL_PATTERNS } from "./parsers";
 
 export interface Symbol {
   name: string;
@@ -47,6 +48,9 @@ const SUPPORTED_EXTENSIONS = new Set([
   ".sh", ".bash", ".zsh",
   // Perl
   ".pl", ".pm",
+  // Telecom DSLs — common in voip/telephony backends (ivozprovider, asterisk, kamailio)
+  ".cfg",   // Kamailio main config (route[], failure_route[], etc.)
+  ".conf",  // Asterisk dialplan ([context], exten => ...)
 ]);
 
 // Files without extension are still indexed if first line is a shebang
@@ -206,79 +210,8 @@ function extractSymbols(files: string[]): Symbol[] {
   return symbols;
 }
 
-const PATTERNS: Array<{ regex: RegExp; type: Symbol["type"]; nameGroup: number }> = [
-  // TypeScript / JavaScript
-  { regex: /^(export\s+)?(default\s+)?(async\s+)?function\s+(\w+)/, type: "function", nameGroup: 4 },
-  { regex: /^(export\s+)?(const|let|var)\s+(\w+)\s*=\s*(async\s+)?(\(|function)/, type: "function", nameGroup: 3 },
-  { regex: /^(export\s+)?(abstract\s+)?class\s+(\w+)/, type: "class", nameGroup: 3 },
-  { regex: /^(export\s+)?interface\s+(\w+)/, type: "class", nameGroup: 2 },
-  { regex: /^(export\s+)?enum\s+(\w+)/, type: "class", nameGroup: 2 },
-  { regex: /^(export\s+)?(const|let|var)\s+(\w+)/, type: "variable", nameGroup: 3 },
-
-  // Rust
-  { regex: /^(pub(\s*\([^)]*\))?\s+)?(async\s+)?fn\s+(\w+)/, type: "function", nameGroup: 4 },
-  { regex: /^(pub(\s*\([^)]*\))?\s+)?struct\s+(\w+)/, type: "class", nameGroup: 3 },
-  { regex: /^(pub(\s*\([^)]*\))?\s+)?enum\s+(\w+)/, type: "class", nameGroup: 3 },
-  { regex: /^(pub(\s*\([^)]*\))?\s+)?trait\s+(\w+)/, type: "class", nameGroup: 3 },
-  { regex: /^(pub(\s*\([^)]*\))?\s+)?impl\s+(\w+)/, type: "class", nameGroup: 3 },
-
-  // Go
-  { regex: /^func\s+(\w+)\s*\(/, type: "function", nameGroup: 1 },
-  { regex: /^func\s+\([^)]+\)\s+(\w+)\s*\(/, type: "method", nameGroup: 1 },
-  { regex: /^type\s+(\w+)\s+(struct|interface)/, type: "class", nameGroup: 1 },
-
-  // Python
-  { regex: /^def\s+(\w+)\s*\(/, type: "function", nameGroup: 1 },
-  { regex: /^async\s+def\s+(\w+)\s*\(/, type: "function", nameGroup: 1 },
-  { regex: /^class\s+(\w+)[\s:(]/, type: "class", nameGroup: 1 },
-
-  // PHP 8 attributes — Symfony routes / HTTP verbs (route path indexed as symbol name)
-  { regex: /^#\[(?:Route|Get|Post|Put|Delete|Patch|Head|Options)\(\s*['"]([^'"]+)['"]/, type: "function", nameGroup: 1 },
-
-  // PHP
-  { regex: /^(public|private|protected|static|\s)*(function)\s+(\w+)\s*\(/, type: "function", nameGroup: 3 },
-  { regex: /^(abstract\s+|final\s+)?class\s+(\w+)/, type: "class", nameGroup: 2 },
-
-  // Ruby
-  { regex: /^def\s+(self\.)?(\w+)/, type: "function", nameGroup: 2 },
-  { regex: /^class\s+(\w+)/, type: "class", nameGroup: 1 },
-  { regex: /^module\s+(\w+)/, type: "class", nameGroup: 1 },
-
-  // Java / Kotlin / C#
-  { regex: /^(public|private|protected|internal|static|override|abstract|final|async|sealed|virtual|extern)[\s\w<>\[\]]*\s+(\w+)\s*\(/, type: "method", nameGroup: 2 },
-  { regex: /^(public|private|protected|internal|abstract|final|sealed|open)?\s*(class|interface|enum|record|object|data class)\s+(\w+)/, type: "class", nameGroup: 3 },
-
-  // Kotlin
-  { regex: /^(suspend\s+)?fun\s+(\w+)/, type: "function", nameGroup: 2 },
-
-  // Swift
-  { regex: /^(public|private|internal|open|fileprivate)?\s*func\s+(\w+)/, type: "function", nameGroup: 2 },
-  { regex: /^(public|private|internal|open|fileprivate)?\s*(class|struct|enum|protocol|extension)\s+(\w+)/, type: "class", nameGroup: 3 },
-
-  // Dart
-  { regex: /^(Future<\w+>|void|String|int|bool|double|dynamic|\w+)\s+(\w+)\s*\(/, type: "function", nameGroup: 2 },
-
-  // C / C++
-  { regex: /^(\w[\w\s*<>]+)\s+(\w+)\s*\([^)]*\)\s*(\{|$)/, type: "function", nameGroup: 2 },
-
-  // Scala
-  { regex: /^(def)\s+(\w+)/, type: "function", nameGroup: 2 },
-  { regex: /^(class|object|trait|case class|abstract class)\s+(\w+)/, type: "class", nameGroup: 2 },
-
-  // Elixir
-  { regex: /^(def|defp|defmacro)\s+(\w+)/, type: "function", nameGroup: 2 },
-  { regex: /^defmodule\s+(\w[\w.]+)/, type: "class", nameGroup: 1 },
-
-  // Perl
-  { regex: /^sub\s+(\w+)\s*[({]/, type: "function", nameGroup: 1 },
-  { regex: /^package\s+([\w:]+)\s*;/, type: "class", nameGroup: 1 },
-
-  // Bash / sh / zsh
-  { regex: /^(?:function\s+)?(\w+)\s*\(\s*\)\s*\{/, type: "function", nameGroup: 1 },
-];
-
 function detectSymbol(line: string, lineNumber: number, file: string): Symbol | null {
-  for (const { regex, type, nameGroup } of PATTERNS) {
+  for (const { regex, type, nameGroup } of ALL_PATTERNS) {
     const match = line.match(regex);
     if (!match) continue;
     const name = match[nameGroup];
