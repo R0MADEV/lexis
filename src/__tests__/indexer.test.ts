@@ -99,6 +99,48 @@ onreply_route[HANDLE_REPLY] {
     expect(names).toContain("HANDLE_REPLY");
   });
 
+  test("indexes CGRates profile IDs in scoped JSON files", () => {
+    write("cgrates/tariffplans/attributes.json", `[
+{
+  "Tenant": "cgrates.org",
+  "ID": "ATTR_ACNT_1001",
+  "FilterIDs": ["*string:~*req.Account:1001"]
+},
+{
+  "Tenant": "cgrates.org",
+  "ID": "FLTR_DST_PREMIUM",
+  "Rules": []
+}
+]
+`);
+    write("cgrates/cgrates.json", `{
+  "general": {},
+  "rals": {
+    "ID": "ACT_PRF_PostpaidUser"
+  }
+}
+`);
+    const idx = indexProject(tmpDir, null);
+    const names = idx.symbols.map((s) => s.name);
+    expect(names).toContain("ATTR_ACNT_1001");
+    expect(names).toContain("FLTR_DST_PREMIUM");
+    expect(names).toContain("ACT_PRF_PostpaidUser");
+  });
+
+  test("CGRates parser does NOT match unrelated JSON files", () => {
+    // package.json with an "ID" field that happens to start with a CGRates prefix:
+    // should NOT be picked up because the file isn't a CGRates JSON.
+    write("package.json", `{
+  "name": "myapp",
+  "version": "1.0.0",
+  "ID": "ACT_PRF_NotReallyCgrates"
+}`);
+    write("config/tsconfig.json", `{ "compilerOptions": {} }`);
+    const idx = indexProject(tmpDir, null);
+    const names = idx.symbols.map((s) => s.name);
+    expect(names).not.toContain("ACT_PRF_NotReallyCgrates");
+  });
+
   test("indexes Asterisk dialplan contexts natively", () => {
     write("asterisk/config/dialplan/default.conf", `
 [from-internal]

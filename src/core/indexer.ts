@@ -53,6 +53,18 @@ const SUPPORTED_EXTENSIONS = new Set([
   ".conf",  // Asterisk dialplan ([context], exten => ...)
 ]);
 
+// JSON is NOT in SUPPORTED_EXTENSIONS globally (would index every package.json,
+// tsconfig.json, etc.). Instead, we only include .json files when the path
+// indicates a config we have a parser for — currently CGRates profiles.
+const SCOPED_JSON_PATTERNS = [
+  /(?:^|[\/\\])(cgrates(?:[._-]\w+)?\.json|dispatchers\.json)$/i,
+  /(?:^|[\/\\])(cgrates|tariffplans|tariff_plans)(?:[\/\\])/i,
+];
+
+function isScopedJson(file: string): boolean {
+  return SCOPED_JSON_PATTERNS.some((p) => p.test(file));
+}
+
 // Files without extension are still indexed if first line is a shebang
 const SHEBANG_RE = /^#!.*\b(perl|bash|sh|zsh|python\d?|ruby|node|env\s+\w+)\b/;
 
@@ -181,6 +193,10 @@ function getFiles(projectPath: string): string[] {
         const ext = path.extname(entry.name).toLowerCase();
         if (SUPPORTED_EXTENSIONS.has(ext)) {
           results.push(fullPath);
+        } else if (ext === ".json" && isScopedJson(fullPath)) {
+          // CGRates profile/config JSONs only — keeps the index from drowning
+          // in package.json / tsconfig.json across every project.
+          results.push(fullPath);
         } else if (ext === "" && hasShebang(fullPath)) {
           // extensionless executables (e.g. /usr/local/bin scripts, perl autoconf) — index if shebang present
           results.push(fullPath);
@@ -211,7 +227,8 @@ function extractSymbols(files: string[]): Symbol[] {
 }
 
 function detectSymbol(line: string, lineNumber: number, file: string): Symbol | null {
-  for (const { regex, type, nameGroup } of ALL_PATTERNS) {
+  for (const { regex, type, nameGroup, appliesTo } of ALL_PATTERNS) {
+    if (appliesTo && !appliesTo(file)) continue;
     const match = line.match(regex);
     if (!match) continue;
     const name = match[nameGroup];

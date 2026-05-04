@@ -22,6 +22,7 @@ import { PERL_PATTERNS } from "./perl";
 import { SHELL_PATTERNS } from "./shell";
 import { KAMAILIO_PATTERNS } from "./kamailio";
 import { ASTERISK_PATTERNS } from "./asterisk";
+import { CGRATES_PATTERNS } from "./cgrates";
 
 export const ALL_PATTERNS: ParserPattern[] = [
   ...JS_TS_PATTERNS,
@@ -39,6 +40,7 @@ export const ALL_PATTERNS: ParserPattern[] = [
   ...PERL_PATTERNS,
   ...KAMAILIO_PATTERNS,
   ...ASTERISK_PATTERNS,
+  ...CGRATES_PATTERNS,
   // Shell last — its function regex `name() {` is generic enough to match
   // some other languages' anonymous blocks; let specific parsers win first.
   ...SHELL_PATTERNS,
