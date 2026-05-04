@@ -146,7 +146,7 @@ Honest comparison — not every MCP is trying to do the same thing.
 
 | MCP | Approach | Best for | Limit |
 |---|---|---|---|
-| **lexis-mcp** | Lexical + structural via ripgrep + AST. Pre-builds a symbol index. 28 specialized tools. | Searching, navigating, and understanding existing code. Bug investigation, feature planning. | No semantic search — won't find conceptually related code that uses different words |
+| **lexis-mcp** | Lexical + structural via ripgrep + AST. Pre-builds a symbol index. 28 specialized tools. | Searching, navigating, and understanding existing code. Bug investigation, feature planning. | Matches by names/tokens, not concepts — finds "AuthService" but won't infer "user identity" without keyword overlap |
 | **filesystem MCP** (official) | Generic read/write of files | Reading/writing files where the AI already knows the path | No search, no symbol extraction, no ranking |
 | **Serena** | Uses LSP (Language Server Protocol) per language | Maximum precision (real type info, real refs) | Requires LSPs installed and running per language; heavier setup |
 | **Repomix** | Bundles the entire repo into one big file for the LLM | Small repos that fit in context | Opposite of token-efficient on large repos |

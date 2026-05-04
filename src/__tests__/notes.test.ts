@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { addNote, loadNotes, removeNote, searchNotes } from "../adapters/storage/notes-file";
+import { cleanupTmpProject } from "./test-utils";
 
 let tmpDir: string;
 
@@ -10,7 +11,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
+  cleanupTmpProject(tmpDir);
 });
 
 describe("addNote / loadNotes", () => {

@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { indexProject } from "../core/indexer";
+import { cleanupTmpProject } from "./test-utils";
 
 let tmpDir: string;
 
@@ -16,7 +17,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
+  cleanupTmpProject(tmpDir);
 });
 
 describe("indexProject — full index", () => {
