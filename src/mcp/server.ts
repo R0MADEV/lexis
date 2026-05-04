@@ -141,63 +141,24 @@ on when note() is REQUIRED. Do NOT rely on Claude Code's chat history;
 the MCP server cannot read it.`;
 }
 
-const LEXIS_INSTRUCTIONS = `Lexis — lexical + structural code search.
+const LEXIS_INSTRUCTIONS = `Lexis — code search. Use these tools INSTEAD of reading files.
 
-Use Lexis tools as your PRIMARY way to navigate this codebase. Do NOT read entire files when you can search.
+WORKFLOW: notes → list_entrypoints → search_code → get_symbol → read_file(offset,limit).
 
-WORKFLOW (follow on first query):
-1. notes — recall context from previous sessions
-2. list_entrypoints — understand structure (routes, handlers, CLI commands)
-3. search_code — find symbols/code by keyword (compact output, ~50 tokens/result)
-4. get_symbol — get a function/class implementation by exact name
-5. read_file with offset/limit — only when you need a specific range
+DEFAULTS: output='compact', depth=1, top_k=3. Use context='bug'|'feature' to auto-tune.
+Use call_chain for flows, impact_analysis before refactor, reindex if results stale.
 
-RULES:
-- Default to output='compact'. Use 'content' only when you need 2+ full implementations.
-- For bugs: use search_code with context='bug' (auto depth=2, prioritizes callers + error handlers)
-- For features: use search_code with context='feature' (prioritizes types + patterns)
-- To follow a flow: use call_chain (upstream/downstream)
-- To assess change risk: use impact_analysis before refactoring
-- If results seem stale or a recent file is missing, call reindex
+CRITICAL — note() to persist findings (the MCP can't see the chat):
+- ALWAYS save when: root cause found, design decision made, hypothesis ruled out, task completed.
+- GOOD: "Bug X from Y. The W clue is misleading — actually unrelated." with tags+files.
+- BAD: "started investigating", "found ClassX" (already in index), process commentary.
 
-CRITICAL — SAVING FINDINGS WITH note():
-
-You MUST call note() in these moments. The MCP server cannot see the
-conversation; if you don't save, the knowledge is lost when the session ends.
-
-When to call note() (REQUIRED):
-1. You identified the root cause of a bug → save a note BEFORE writing the fix.
-   Example: note(content="Bug X comes from Y because Z. The misleading clue
-   was W (rule out — it's actually unrelated).", tags=["bug","root-cause"])
-2. You made a non-obvious design decision → save a note explaining WHY.
-   Example: note(content="Chose Redis over Memcached because we need
-   persistence across restarts.", tags=["decision","arch"])
-3. You ruled out a hypothesis after investigation → save it so future sessions
-   don't re-investigate. Example: note(content="The 'fix-X' branch is misleading
-   — it does NOT solve the listeners.cfg problem; only reloads UAC cache.")
-4. You completed a task → save a final summary with: what was the issue,
-   what was the cause, what was the fix, files changed.
-
-What makes a GOOD note:
-- WHY, not WHAT (you searched). Files+queries are auto-tracked separately.
-- Concrete identifiers: file paths, function names, line numbers, branch names.
-- Negative findings ("X does NOT do Y") are as valuable as positive ones.
-
-What makes a BAD note (DON'T save these):
-- "Started investigating auth flow" — process noise
-- "User asked about X" — meta-commentary
-- "Found UserService class" — facts already in the index
-
-TOKEN BUDGET:
-- snippet (~15 tok) → orient
-- compact (default, ~50 tok) → standard
-- content (~500 tok) → full implementation, use sparingly
-- files / count → when you only need paths or a number`;
+OUTPUT MODES (tokens/result): snippet ~15, compact ~50, content ~500, files/count tiny.`;
 
 const TOOLS = [
   {
     name: "search_code",
-    description: "Search code chunks. output: 'snippet'(~15tok/result — match line ±1 with line numbers, best for exploration), 'compact'(default,~50tok/result — signature+first body line), 'content'(~500tok/result), 'files', 'count', 'trace'(call topology,~10tok/symbol), 'signatures'(one-line sigs,~5tok/result), 'arch'(one result per layer: route→controller→service→repository→model). depth: 1(default,exact), 2(concept). top_k: default 3. context: 'bug'(prioritizes callers+error handlers, auto depth=2), 'feature'(prioritizes types+patterns).",
+    description: "Search code. output: snippet|compact|content|files|count|trace|signatures|arch (default compact). depth 1-2 (default 1). top_k default 3. context: bug|feature (auto-tunes depth and ranking).",
     inputSchema: {
       type: "object",
       properties: {
@@ -283,7 +244,7 @@ const TOOLS = [
   },
   {
     name: "find_writes",
-    description: "Find code that writes to a given file path or filename. Detects file_put_contents, fopen('w'), fs.writeFile, open(...,'w'), shell redirects (>, tee), and similar across PHP/JS/TS/Python/Ruby/Bash/Perl. Use when investigating bugs like 'config file not updating'.",
+    description: "Find code that writes to a file/filename across PHP/JS/Python/Ruby/Bash. Detects writeFile, fopen('w'), shell redirects, etc. Use when investigating 'config not updating' bugs.",
     inputSchema: {
       type: "object",
       properties: {
@@ -294,7 +255,7 @@ const TOOLS = [
   },
   {
     name: "git_context",
-    description: "Get git context for a keyword: matching branch names (local + remote) and recent commits. Surfaces in-progress work or fixes related to the topic before duplicating effort.",
+    description: "Get git context for a keyword: matching branches + recent commits. Surfaces in-progress work before duplicating effort.",
     inputSchema: {
       type: "object",
       properties: {
@@ -351,7 +312,7 @@ const TOOLS = [
   },
   {
     name: "event_handlers",
-    description: "Find dispatchers AND handlers of a named event/signal across event-driven frameworks (Symfony, Laravel, NestJS, Spring, Doctrine, EventEmitter, Rails callbacks, Django signals). CRITICAL for systems where call_chain hits 'no path' because flow goes through dispatchers.",
+    description: "Find dispatchers + handlers of an event/signal (Symfony, Laravel, NestJS, Spring, Doctrine, EventEmitter, Rails, Django signals). Use when call_chain hits 'no path' due to event indirection.",
     inputSchema: {
       type: "object",
       properties: {
@@ -454,7 +415,7 @@ const TOOLS = [
   },
   {
     name: "notes",
-    description: "Recall persistent notes from previous sessions. Use this FIRST when starting work on a known area — saves re-discovering what you already learned. Match by content/tag/file substring, or pass no query to get the latest 10.",
+    description: "Recall persistent notes from previous sessions. Call FIRST on a known area. Match by content/tag/file substring, or no query for latest 10.",
     inputSchema: {
       type: "object",
       properties: {
@@ -481,7 +442,7 @@ const TOOLS = [
   },
   {
     name: "lint",
-    description: "Run the project's typechecker/linter and return only errors+warnings in compact format. Auto-detects: TypeScript (tsconfig.json), Go (go.mod), Rust (Cargo.toml), Python (pyproject.toml/setup.py), PHP (composer.json+phpstan), Ruby (Gemfile+rubocop). Returns the parsed errors only — saves you having to read raw compiler output.",
+    description: "Run project typechecker/linter, return only parsed errors+warnings. Auto-detects TS/Go/Rust/Python/PHP/Ruby by marker file. Saves reading raw compiler output.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1263,12 +1224,26 @@ function readRangeKey(path: string, offset: number, limit: number): string {
 }
 
 // Hide tools that don't apply to the current project from `tools/list`.
-// Saves Claude a wasted call when, e.g., `lint` is invoked on a project
-// without a linter marker file. Keeps the tool list contextually relevant.
-function filterToolsForProject<T extends { name: string }>(tools: T[], projectPath: string): T[] {
+// Saves Claude wasted tool calls AND ~300+ tokens of fixed cost on tools that
+// would never produce useful output for this project.
+//
+// Detection is cheap (just fs.existsSync on a few markers) and runs once per
+// `tools/list` request — typically once per session.
+export function filterToolsForProject<T extends { name: string }>(tools: T[], projectPath: string): T[] {
   const hasLinter = detectLinter(projectPath) !== null;
+  const hasGit = fs.existsSync(path.join(projectPath, ".git"));
+  const hasTests = ["tests", "test", "spec", "__tests__", "cypress", "e2e"].some((d) =>
+    fs.existsSync(path.join(projectPath, d))
+  );
+  const hasConfigs = ["config", ".env", "settings.py", "config.yaml", "config.yml"].some((p) =>
+    fs.existsSync(path.join(projectPath, p))
+  );
+
   return tools.filter((t) => {
     if (t.name === "lint" && !hasLinter) return false;
+    if ((t.name === "git_context" || t.name === "recent_changes" || t.name === "hot_files") && !hasGit) return false;
+    if (t.name === "tests_for" && !hasTests) return false;
+    if (t.name === "config_lookup" && !hasConfigs) return false;
     return true;
   });
 }
@@ -3311,12 +3286,14 @@ export function dispatchTool(
     default:                 return `Unknown tool: ${name}`;
   }
 
-  // Add token budget footer for large responses (>=500 tokens) so callers can self-regulate.
-  // ~4 chars per token is the standard heuristic for English/code mixes.
-  const approxTokens = Math.round(result.length / 4);
-  if (approxTokens >= 500) {
-    const ms = Date.now() - t0;
-    result = `${result}\n\n[~${approxTokens} tokens, ${ms}ms]`;
+  // Optional token-budget footer for diagnosing tool weight. Off by default
+  // so we don't burn ~50 tokens per large response. Enable with LEXIS_DEBUG_FOOTER=1.
+  if (process.env["LEXIS_DEBUG_FOOTER"] === "1") {
+    const approxTokens = Math.round(result.length / 4);
+    if (approxTokens >= 500) {
+      const ms = Date.now() - t0;
+      result = `${result}\n\n[~${approxTokens} tokens, ${ms}ms]`;
+    }
   }
 
   if (cacheKey) cacheSet(cacheKey, result);

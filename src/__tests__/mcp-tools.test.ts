@@ -301,6 +301,46 @@ describe("dispatchTool — notes / forget", () => {
   });
 });
 
+describe("tool visibility — context-aware filtering", () => {
+  test("git-related tools (git_context, recent_changes, hot_files) are HIDDEN when project is not a git repo", () => {
+    write("src/a.ts", "x");
+    const idx = indexProject(tmpDir, null);
+    const { filterToolsForProject } = require("../mcp/server");
+    const allTools = [
+      { name: "search_code" },
+      { name: "git_context" },
+      { name: "recent_changes" },
+      { name: "hot_files" },
+    ];
+    const filtered = filterToolsForProject(allTools, tmpDir);
+    const names = filtered.map((t: { name: string }) => t.name);
+    expect(names).toContain("search_code");
+    expect(names).not.toContain("git_context");
+    expect(names).not.toContain("recent_changes");
+    expect(names).not.toContain("hot_files");
+  });
+
+  test("tests_for is HIDDEN when project has no test directory", () => {
+    write("src/a.ts", "export const x = 1;");
+    const { filterToolsForProject } = require("../mcp/server");
+    const filtered = filterToolsForProject(
+      [{ name: "search_code" }, { name: "tests_for" }],
+      tmpDir,
+    );
+    expect(filtered.map((t: { name: string }) => t.name)).not.toContain("tests_for");
+  });
+
+  test("tests_for is VISIBLE when tests/ directory exists", () => {
+    write("tests/a.test.ts", "test('x', () => {});");
+    const { filterToolsForProject } = require("../mcp/server");
+    const filtered = filterToolsForProject(
+      [{ name: "search_code" }, { name: "tests_for" }],
+      tmpDir,
+    );
+    expect(filtered.map((t: { name: string }) => t.name)).toContain("tests_for");
+  });
+});
+
 describe("tool visibility — context-aware tool list", () => {
   test("lint tool is HIDDEN when project has no linter marker", () => {
     write("README.md", "# just docs, no project");
