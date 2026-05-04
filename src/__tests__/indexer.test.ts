@@ -44,7 +44,7 @@ export function hashPassword(pw: string): string { return pw; }
     const files = idx.files;
     expect(files.some((f) => f.includes("node_modules"))).toBe(false);
     expect(files.some((f) => f.includes("dist"))).toBe(false);
-    expect(files.some((f) => f.includes("src/index.ts"))).toBe(true);
+    expect(files.some((f) => f.endsWith(path.join("src", "index.ts")))).toBe(true);
   });
 
   test("indexes Python functions", () => {

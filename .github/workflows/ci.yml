@@ -23,6 +23,11 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
 
+      # GITHUB_TOKEN authenticates @vscode/ripgrep's binary download.
+      # Without it, GitHub returns 403 on macOS/Windows runners due to
+      # anonymous rate limits on release downloads.
       - run: npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: npm run build
       - run: npm test
