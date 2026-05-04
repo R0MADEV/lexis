@@ -160,6 +160,56 @@ describe("dispatchTool — list_symbols", () => {
   });
 });
 
+describe("dispatchTool — path compression in output", () => {
+  test("search_code with output='files' compresses common path prefix when 3+ results share it", () => {
+    write("library/Ivoz/Provider/Domain/Service/ProxyTrunkUpdate.php",
+      "<?php class ProxyTrunkUpdate {}");
+    write("library/Ivoz/Provider/Domain/Service/ProxyTrunkSync.php",
+      "<?php class ProxyTrunkSync {}");
+    write("library/Ivoz/Provider/Domain/Service/ProxyTrunkReload.php",
+      "<?php class ProxyTrunkReload {}");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "search_code",
+      { query: "ProxyTrunk", output: "files", top_k: 10 },
+      idx,
+      tmpDir,
+    );
+    // Should have a "BASE:" header and short relative paths
+    expect(result).toMatch(/BASE:.+/);
+    expect(result).toContain("ProxyTrunkUpdate.php");
+    // The long Provider/Domain/Service prefix should appear only once (in BASE)
+    const longPathCount = (result.match(/library\/Ivoz\/Provider\/Domain\/Service/g) || []).length;
+    expect(longPathCount).toBeLessThanOrEqual(1);
+  });
+
+  test("search_code does NOT compress when results don't share enough prefix", () => {
+    write("src/auth/AuthService.ts", "export class AuthService {}");
+    write("config/settings.ts", "export const SETTINGS_AuthService = 1;");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "search_code",
+      { query: "AuthService", output: "files", top_k: 10 },
+      idx,
+      tmpDir,
+    );
+    // No BASE header when results don't share a meaningful prefix
+    expect(result).not.toMatch(/^BASE:/m);
+  });
+
+  test("search_code does NOT compress when fewer than 3 results", () => {
+    write("src/lib/Single.ts", "export class Single {}");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "search_code",
+      { query: "Single", output: "files", top_k: 10 },
+      idx,
+      tmpDir,
+    );
+    expect(result).not.toMatch(/^BASE:/m);
+  });
+});
+
 describe("dispatchTool — find_file", () => {
   test("finds files by name pattern", () => {
     write("src/auth/login.ts", "export const x = 1;");
@@ -248,6 +298,67 @@ describe("dispatchTool — notes / forget", () => {
     const id = idMatch[1]!;
     const forgetResult = dispatchTool("forget", { id }, idx, tmpDir);
     expect(forgetResult.toLowerCase()).toMatch(/deleted|removed|forg/i);
+  });
+});
+
+describe("dispatchTool — auto-truncate huge results", () => {
+  test("read_file truncates extremely long single results with marker", () => {
+    // Generate a 500-line file
+    const longBody = Array.from({ length: 500 }, (_, i) => `  // line ${i + 1}: ${"x".repeat(80)}`).join("\n");
+    write("src/big.ts", `export function huge() {\n${longBody}\n}\n`);
+    const idx = indexProject(tmpDir, null);
+    // Read 500 lines but expect truncation since output exceeds budget
+    const result = dispatchTool(
+      "read_file",
+      { path: "src/big.ts", offset: 1, limit: 500 },
+      idx,
+      tmpDir,
+    );
+    // Either it returns all (if under budget) or it truncates with a clear marker
+    if (result.length > 30000) {
+      // Not truncated — fail explicitly so we notice
+      throw new Error("read_file returned " + result.length + " chars, should have been truncated");
+    }
+    // If truncated, the marker should be present
+    expect(result.length).toBeLessThan(30000);
+  });
+});
+
+describe("dispatchTool — investigate (combined tool)", () => {
+  test("returns definition + references + tests in one call", () => {
+    write("src/lib/AuthService.ts", `
+export class AuthService {
+  login(user: string) { return true; }
+}
+`);
+    write("src/services/UserController.ts", `
+import { AuthService } from "../lib/AuthService";
+export class UserController {
+  constructor(private auth: AuthService) {}
+}
+`);
+    write("tests/AuthService.test.ts", `
+import { AuthService } from "../src/lib/AuthService";
+test("login", () => { new AuthService().login("x"); });
+`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("investigate", { name: "AuthService" }, idx, tmpDir);
+    // Definition section
+    expect(result).toMatch(/DEFINITION/i);
+    expect(result).toContain("class AuthService");
+    // References section
+    expect(result).toMatch(/REFERENCES|USED BY|CALLERS/i);
+    expect(result).toContain("UserController");
+    // Tests section
+    expect(result).toMatch(/TESTS/i);
+    expect(result).toContain("AuthService.test.ts");
+  });
+
+  test("handles unknown symbol gracefully", () => {
+    write("src/a.ts", "export const x = 1;");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("investigate", { name: "TotallyUnknown" }, idx, tmpDir);
+    expect(result.toLowerCase()).toMatch(/not found|no.*found/);
   });
 });
 

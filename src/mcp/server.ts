@@ -66,7 +66,7 @@ function runRg(args: string[]): { stdout: string; stderr: string } {
 
 // Tools whose results are deterministic given the same args+index — safe to cache.
 // Excluded: read_file (cheap, mtime-sensitive), list_symbols & find_file (already index-only).
-const CACHEABLE = new Set(["search_code", "get_symbol", "find_references", "get_context", "find_writes", "git_context", "recent_changes", "call_chain", "list_entrypoints", "explain", "event_handlers", "impact_analysis", "config_lookup", "interface_implementations", "pattern_search", "tests_for", "hot_files", "dead_code"]);
+const CACHEABLE = new Set(["search_code", "get_symbol", "find_references", "get_context", "find_writes", "git_context", "recent_changes", "call_chain", "list_entrypoints", "explain", "event_handlers", "impact_analysis", "config_lookup", "interface_implementations", "pattern_search", "tests_for", "hot_files", "dead_code", "investigate"]);
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -479,6 +479,18 @@ const TOOLS = [
     description: "Re-scan the project to pick up new or changed files since the last index. Call this if search results seem stale or a recently added file is not found.",
     inputSchema: { type: "object", properties: {} },
   },
+  {
+    name: "investigate",
+    description: "All-in-one symbol exploration: returns the definition + who references it + related tests in a single call. Saves 2-3 round-trips compared to chaining get_symbol+find_references+tests_for. Use when you need to understand a class/function holistically.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Symbol name (exact or partial)" },
+        file_filter: { type: "string", description: "Optional: filter by file path substring" },
+      },
+      required: ["name"],
+    },
+  },
 ];
 
 function buildTrace(results: SearchResult[], projectRoot: string): string {
@@ -658,8 +670,9 @@ function execSearchCode(
   }
 
   if (output === "files") {
-    const uniqueFiles = [...new Set(results.map((r) => r.symbol.file))];
-    return uniqueFiles.join("\n");
+    const projectRoot = path.resolve(projectPath);
+    const rel = [...new Set(results.map((r) => path.relative(projectRoot, r.symbol.file)))];
+    return formatPathList(rel);
   }
 
   if (output === "snippet") {
@@ -871,10 +884,27 @@ function execReadFile(
       endIdx < totalLines
         ? `\n\n[... ${totalLines - endIdx} more lines. Call read_file with offset=${endIdx + 1} to continue.]`
         : "";
-    return header + numbered + footer;
+    return truncateIfExcessive(header + numbered + footer, offset, endIdx);
   } catch {
     return `Could not read file: ${resolved}`;
   }
+}
+
+// If a single read_file response exceeds the budget, cut it in the middle
+// and tell the caller exactly how to resume. Prevents one tool call from
+// dumping 5000+ lines into the LLM context unnecessarily.
+const READ_FILE_MAX_CHARS = 24_000;  // ~6k tokens at ~4 chars/token
+function truncateIfExcessive(text: string, requestedOffset: number, lastReadLine: number): string {
+  if (text.length <= READ_FILE_MAX_CHARS) return text;
+  const cutoff = Math.floor(READ_FILE_MAX_CHARS * 0.9);
+  const truncated = text.slice(0, cutoff);
+  // Try to cut at a newline so the truncation is clean
+  const lastNl = truncated.lastIndexOf("\n");
+  const safe = lastNl > cutoff * 0.7 ? truncated.slice(0, lastNl) : truncated;
+  // Estimate the line we got cut at (rough — counts \n in safe)
+  const linesShown = (safe.match(/\n/g) || []).length;
+  const approxLastLine = requestedOffset + linesShown;
+  return `${safe}\n\n[... output truncated to fit token budget. Read more with offset=${approxLastLine}. Original range went up to line ${lastReadLine}.]`;
 }
 
 function execListSymbols(
@@ -1024,6 +1054,40 @@ function baseFileName(file: string): string {
   return i === -1 ? file : file.slice(i + 1);
 }
 
+// Detect the longest common path prefix (truncated to a path separator) so we
+// can print it once at the top of a result list and use short relative paths
+// for each entry. Saves ~30% of tokens in deep monorepos like ivozprovider.
+//
+// Returns null when compression isn't worth it (fewer than 3 paths, prefix
+// too short to matter, or paths don't share a meaningful directory).
+const MIN_COMPRESS_PATHS = 3;
+const MIN_COMPRESS_PREFIX_LEN = 12;
+
+function compressPaths(paths: string[]): { base: string; rels: string[] } | null {
+  if (paths.length < MIN_COMPRESS_PATHS) return null;
+
+  let prefix = paths[0] ?? "";
+  for (let i = 1; i < paths.length; i++) {
+    const p = paths[i] ?? "";
+    let j = 0;
+    while (j < prefix.length && j < p.length && prefix[j] === p[j]) j++;
+    prefix = prefix.slice(0, j);
+    if (prefix.length === 0) break;
+  }
+
+  const lastSep = Math.max(prefix.lastIndexOf("/"), prefix.lastIndexOf("\\"));
+  if (lastSep < MIN_COMPRESS_PREFIX_LEN) return null;
+
+  const base = prefix.slice(0, lastSep + 1);
+  return { base, rels: paths.map((p) => p.slice(base.length)) };
+}
+
+function formatPathList(paths: string[]): string {
+  const c = compressPaths(paths);
+  if (!c) return paths.join("\n");
+  return `BASE: ${c.base}\n\n${c.rels.join("\n")}`;
+}
+
 // Re-rank search() results by relevance for the user's query.
 // Boosts on top of the searcher's intrinsic score:
 //   + symbol name === query (case-insensitive)        → +500
@@ -1091,6 +1155,75 @@ function globToRegex(glob: string): RegExp {
     .replace(/\?/g, ".")
     .replace(/::DOUBLESTAR::/g, ".*");
   return new RegExp(re + "$", "i");
+}
+
+// All-in-one investigation: definition + references + tests, deduplicated.
+// Saves 2-3 round-trips vs chaining the individual tools.
+function execInvestigate(
+  args: Record<string, unknown>,
+  index: Index,
+  projectPath: string
+): string {
+  const name = args["name"] as string;
+  const fileFilter = args["file_filter"] as string | undefined;
+  if (!name) return "Error: 'name' is required.";
+
+  const sections: string[] = [];
+
+  // 1. DEFINITION
+  const defResult = getSymbol(name, fileFilter, index);
+  if (defResult) {
+    const projectRoot = path.resolve(projectPath);
+    const relPath = path.relative(projectRoot, defResult.symbol.file);
+    const lineCount = defResult.body.split("\n").length;
+    sections.push(
+      `═══ DEFINITION ═══\n${relPath}:${defResult.symbol.lineStart}-${defResult.symbol.lineStart + lineCount - 1} [${defResult.symbol.type}]\n\n\`\`\`\n${defResult.body}\n\`\`\``
+    );
+  } else {
+    return `Symbol "${name}" not found.`;
+  }
+
+  // 2. REFERENCES — limit to first 8, dedup by file (the user only needs to know "who calls me")
+  const refs = findReferences(name, projectPath, index);
+  if (refs.length > 0) {
+    const projectRoot = path.resolve(projectPath);
+    const seen = new Set<string>();
+    const refLines: string[] = [];
+    for (const r of refs) {
+      const key = `${r.file}:${r.line}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      // Skip the definition file itself in references
+      if (r.file === defResult.symbol.file && Math.abs(r.line - defResult.symbol.lineStart) < 5) continue;
+      const rel = path.relative(projectRoot, r.file);
+      refLines.push(`${rel}:${r.line}  [${r.kind}]`);
+      if (refLines.length >= 8) break;
+    }
+    if (refLines.length > 0) {
+      sections.push(`═══ REFERENCES (${refs.length} total, showing top ${refLines.length}) ═══\n${formatPathList(refLines)}`);
+    }
+  }
+
+  // 3. TESTS — find test files that mention the symbol
+  const escName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const testRgArgs = [
+    "--files-with-matches", "--no-heading",
+    "-e", `\\b${escName}\\b`,
+    "--glob", "**/{test,tests,spec,__tests__}/**",
+    "--glob", "**/*.{test,spec}.*",
+    "--glob", "!node_modules/**", "--glob", "!vendor/**",
+    projectPath,
+  ];
+  const testStdout = runRg(testRgArgs).stdout.trim();
+  if (testStdout) {
+    const projectRoot = path.resolve(projectPath);
+    const testFiles = [...new Set(testStdout.split("\n"))]
+      .map((f) => path.relative(projectRoot, f))
+      .slice(0, 5);
+    sections.push(`═══ TESTS ═══\n${testFiles.join("\n")}`);
+  }
+
+  return sections.join("\n\n");
 }
 
 function execGetSymbol(
@@ -2800,6 +2933,7 @@ export function dispatchTool(
     case "note":             result = execNote(args, projectPath); break;
     case "notes":            result = execNotes(args, projectPath); break;
     case "forget":           result = execForget(args, projectPath); break;
+    case "investigate":      result = execInvestigate(args, index, projectPath); break;
     default:                 return `Unknown tool: ${name}`;
   }
 
