@@ -170,6 +170,73 @@ describe("dispatchTool — notes / forget", () => {
   });
 });
 
+describe("dispatchTool — fallback for unsupported languages", () => {
+  test("get_symbol finds Lua function via fallback", () => {
+    write("scripts/util.lua", `
+local function processData(input)
+  return input * 2
+end
+
+function MyModule.compute(x)
+  return x + 1
+end
+`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("get_symbol", { name: "processData" }, idx, tmpDir);
+    expect(result).toContain("processData");
+    expect(result.toLowerCase()).toMatch(/fallback|file:|util\.lua/);
+  });
+
+  test("get_symbol finds Elixir defmodule via fallback", () => {
+    write("lib/auth.ex", `
+defmodule MyApp.Auth do
+  def login(user) do
+    :ok
+  end
+end
+`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("get_symbol", { name: "Auth" }, idx, tmpDir);
+    expect(result).toContain("Auth");
+    expect(result).toContain("defmodule");
+  });
+
+  test("get_symbol finds Kamailio route via fallback", () => {
+    write("kamailio/users/config/kamailio.cfg", `
+route[GET_DDI_PREFIX] {
+  if (search("@.*\\\\*")) {
+    xlog("found prefix");
+  }
+}
+`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("get_symbol", { name: "GET_DDI_PREFIX" }, idx, tmpDir);
+    expect(result).toContain("GET_DDI_PREFIX");
+    expect(result).toContain("route[");
+  });
+
+  test("get_symbol returns 'not found' when no fallback match either", () => {
+    write("a.txt", "just plain text");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("get_symbol", { name: "DefinitelyNotHere" }, idx, tmpDir);
+    expect(result).toContain("not found");
+  });
+
+  test("list_symbols falls back to ripgrep for unsupported file types", () => {
+    write("config/extensions.conf", `
+[from-internal]
+exten => _X.,1,Goto(globals,s,1)
+
+[outbound-routes]
+exten => _X.,1,NoOp()
+`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("list_symbols", { file_filter: "extensions.conf" }, idx, tmpDir);
+    expect(result).toContain("from-internal");
+    expect(result).toContain("outbound-routes");
+  });
+});
+
 describe("dispatchTool — unknown tool", () => {
   test("returns an error message for unknown tool", () => {
     const idx = indexProject(tmpDir, null);
