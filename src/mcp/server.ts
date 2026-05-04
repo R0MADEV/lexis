@@ -6,6 +6,7 @@ import { search, getSymbol, findReferences, getContext, suggestSimilar, SearchRe
 import { QueryIntent, extractTechnicalTerms } from "../core/query-analyzer";
 import { loadIndex, saveIndex } from "../adapters/storage/index-file";
 import { addNote, removeNote, searchNotes, loadNotesForCurrentBranch, detectBranch, isMainBranch } from "../adapters/storage/notes-file";
+import { trackToolCall, saveSessionLog } from "./session-tracker";
 import { Index, Symbol as IndexedSymbol, indexProject } from "../core/indexer";
 
 // All diagnostic output goes to stderr so it doesn't corrupt the stdio MCP protocol
@@ -103,22 +104,36 @@ function buildSessionInstructions(projectPath: string): string {
   const notes = loadNotesForCurrentBranch(projectPath);
   if (notes.length === 0) return LEXIS_INSTRUCTIONS;
 
-  // Newest 5 notes — most recent context first
-  const recent = notes.slice(-5).reverse();
-  const noteLines = recent.map((n) => {
+  // Curated findings (manual notes) carry far more context than auto-session
+  // tracking. Show up to 5 manuals first; fall back to auto-session only if
+  // there are no manuals yet on this branch.
+  const isAuto = (tags: string[]) => tags.includes("auto-session");
+  const manuals = notes.filter((n) => !isAuto(n.tags)).slice(-5).reverse();
+  const autoLogs = notes.filter((n) => isAuto(n.tags)).slice(-2).reverse();
+
+  const fmt = (n: { createdAt: string; id: string; content: string }) => {
     const date = n.createdAt.slice(0, 10);
     const summary = n.content.split("\n")[0]?.slice(0, 200) ?? "";
     return `- ${date} (${n.id}): ${summary}`;
-  }).join("\n");
+  };
+
+  const sections: string[] = [];
+  if (manuals.length > 0) {
+    sections.push(`### Curated findings (most recent first)\n${manuals.map(fmt).join("\n")}`);
+  }
+  if (autoLogs.length > 0) {
+    sections.push(`### Recent activity logs\n${autoLogs.map(fmt).join("\n")}`);
+  }
 
   return `${LEXIS_INSTRUCTIONS}
 
 ## Current branch: ${branch}
 
-You are continuing work on this branch. Past findings (most recent first):
-${noteLines}
+You are continuing work on this branch. Read \`notes\` tool for full content.
 
-Use \`notes\` tool to read the full text of any of these. Save new findings with \`note\`.`;
+${sections.join("\n\n")}
+
+Save new findings with \`note\` — describe WHAT you discovered and WHY, not what you searched.`;
 }
 
 const LEXIS_INSTRUCTIONS = `Lexis — lexical + structural code search.
@@ -2905,6 +2920,7 @@ export function startMcpServer(projectPath: string): void {
 
         const toolArgs = p.arguments ?? {};
         try {
+          trackToolCall(p.name, toolArgs);
           index = refreshIfStale(index, resolvedPath);
           let result: string;
           if (p.name === "reindex") {
@@ -2930,7 +2946,23 @@ export function startMcpServer(projectPath: string): void {
   });
 
   rl.on("close", () => {
-    log("[lexis mcp] stdin closed, exiting.");
+    log("[lexis mcp] stdin closed, saving session log...");
+    saveSessionLog(resolvedPath);
     process.exit(0);
+  });
+
+  // Defensive: also save on uncaught exceptions and signals so abrupt terminal
+  // kills (Ctrl+C in the parent shell, OS shutdown, etc.) don't lose context.
+  // Note: SIGKILL can't be intercepted — that's why we also persist every 2 min.
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as NodeJS.Signals[]) {
+    process.on(sig, () => {
+      try { saveSessionLog(resolvedPath); } catch { /* ignore */ }
+      process.exit(0);
+    });
+  }
+  process.on("uncaughtException", (e) => {
+    log(`[lexis mcp] uncaught: ${(e as Error).message}`);
+    try { saveSessionLog(resolvedPath); } catch { /* ignore */ }
+    process.exit(1);
   });
 }
