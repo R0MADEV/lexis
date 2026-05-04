@@ -865,14 +865,108 @@ function execFindFile(
   args: Record<string, unknown>,
   index: Index
 ): string {
-  const pattern = (args["pattern"] as string).toLowerCase();
-  const matched = index.files.filter((f) => f.toLowerCase().includes(pattern));
+  const rawPattern = args["pattern"] as string;
+  if (!rawPattern) return "Error: 'pattern' is required.";
 
-  log(`[find_file] "${pattern}" → ${matched.length} results`);
+  const ranked = rankFiles(rawPattern, index.files);
+  log(`[find_file] "${rawPattern}" → ${ranked.length} results`);
 
-  if (matched.length === 0) return "No files found.";
-  const suffix = matched.length > 30 ? `\n... (${matched.length - 30} more)` : "";
-  return matched.slice(0, 30).join("\n") + suffix;
+  if (ranked.length === 0) {
+    return `No files match "${rawPattern}".`;
+  }
+  const top = ranked.slice(0, 30).map((r) => r.file);
+  const suffix = ranked.length > 30 ? `\n... (${ranked.length - 30} more)` : "";
+  return top.join("\n") + suffix;
+}
+
+// Rank files by relevance to the search pattern.
+// Strategies tried in order (higher score wins):
+//   1. Glob match (e.g. *.controller.ts, **/auth/*)
+//   2. Exact filename match (case-insensitive)
+//   3. Identifier-tokenized filename match (UserController == user-controller == user_controller)
+//   4. Substring filename match
+//   5. Substring path match
+//
+// Tie-breakers (added to score, smaller adjustments):
+//   + bonus for shorter paths (likely more "primary" files)
+//   + bonus for src/lib/app/core dirs
+//   - penalty for tests/, vendor/, fixtures/, docs/
+function rankFiles(rawPattern: string, files: string[]): Array<{ file: string; score: number }> {
+  const isGlob = /[*?]/.test(rawPattern);
+  const globRe = isGlob ? globToRegex(rawPattern) : null;
+
+  const lowerPattern = rawPattern.toLowerCase();
+  const tokens = identTokens(rawPattern);
+  const tokenJoined = tokens.join("");  // e.g. "UserController" → "usercontroller"
+
+  const scored: Array<{ file: string; score: number }> = [];
+
+  for (const file of files) {
+    const lowerFile = file.toLowerCase();
+    const basename = baseFileName(file).toLowerCase();
+    const baseStem = basename.replace(/\.[^.]+$/, "");
+    const baseStemNorm = baseStem.replace(/[-_.]/g, "");
+
+    let score = 0;
+
+    if (globRe) {
+      if (!globRe.test(file)) continue;        // glob mode: only files that match
+      score = 1000;
+    } else if (basename === lowerPattern || baseStem === lowerPattern) {
+      score = 1000;                                       // exact filename
+    } else if (tokenJoined && baseStemNorm === tokenJoined) {
+      score = 900;                                        // identifier-equivalent (UserController ~ user-controller)
+    } else if (basename.includes(lowerPattern)) {
+      score = 700 - basename.indexOf(lowerPattern);       // earlier substring = better
+    } else if (tokenJoined && baseStemNorm.includes(tokenJoined)) {
+      score = 600;                                        // identifier-equivalent substring
+    } else if (lowerFile.includes(lowerPattern)) {
+      score = 300 - lowerFile.indexOf(lowerPattern) / 10; // path-only match, weakest
+    } else {
+      continue;
+    }
+
+    // Path-quality adjustments (cap each at ±50)
+    if (/[\/\\](src|lib|app|core|cmd|pkg|internal|api)[\/\\]/i.test(file)) score += 30;
+    if (/[\/\\](tests?|spec|fixtures?|docs?|examples?|node_modules|vendor)[\/\\]/i.test(file)) score -= 40;
+
+    // Shorter paths = more central (cap at +20)
+    score += Math.max(0, 20 - Math.floor(file.length / 10));
+
+    scored.push({ file, score });
+  }
+
+  scored.sort((a, b) => b.score - a.score || a.file.length - b.file.length);
+  return scored;
+}
+
+function baseFileName(file: string): string {
+  const i = Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\"));
+  return i === -1 ? file : file.slice(i + 1);
+}
+
+// Tokenize an identifier-style string. UserController → ["user", "controller"];
+// user-controller → ["user", "controller"]; my_var → ["my", "var"]
+function identTokens(s: string): string[] {
+  return s
+    .replace(/[-_.\s]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+// Convert a simple glob to a RegExp. Supports * (any chars except /), ** (any),
+// ? (single char), and literal segments. Insensitive on case.
+function globToRegex(glob: string): RegExp {
+  const re = glob
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")  // escape regex specials except * and ?
+    .replace(/\*\*/g, "::DOUBLESTAR::")
+    .replace(/\*/g, "[^/\\\\]*")
+    .replace(/\?/g, ".")
+    .replace(/::DOUBLESTAR::/g, ".*");
+  return new RegExp(re + "$", "i");
 }
 
 function execGetSymbol(

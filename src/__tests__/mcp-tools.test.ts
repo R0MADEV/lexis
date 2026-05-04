@@ -136,6 +136,52 @@ describe("dispatchTool — find_file", () => {
     expect(result).toContain("logout.ts");
     expect(result).not.toContain("payments.ts");
   });
+
+  test("ranks exact filename matches first", () => {
+    write("src/lib/AuthService.ts", "export class AuthService {}");
+    write("src/utils/helper-with-AuthService-mention.ts", "// references AuthService");
+    write("src/components/AuthService.spec.ts", "// test");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("find_file", { pattern: "AuthService" }, idx, tmpDir);
+    const lines = result.split("\n");
+    // Exact filename match should rank first
+    expect(lines[0]).toContain("AuthService.ts");
+    expect(lines[0]).not.toContain("helper-with");
+  });
+
+  test("matches across camelCase / kebab-case / snake_case", () => {
+    write("src/lib/UserController.ts", "export class UserController {}");
+    write("src/handlers/user-controller.go", "package handlers");
+    write("src/services/user_controller.py", "class UserController: pass");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("find_file", { pattern: "UserController" }, idx, tmpDir);
+    expect(result).toContain("UserController.ts");
+    expect(result).toContain("user-controller.go");
+    expect(result).toContain("user_controller.py");
+  });
+
+  test("prefers src/ over tests/ folders", () => {
+    write("src/auth.ts", "export const a = 1;");
+    write("tests/auth.test.ts", "// test");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("find_file", { pattern: "auth" }, idx, tmpDir);
+    const lines = result.split("\n");
+    const srcIdx = lines.findIndex((l) => l.includes("src") && !l.includes("tests"));
+    const testIdx = lines.findIndex((l) => l.includes("tests"));
+    expect(srcIdx).toBeGreaterThanOrEqual(0);
+    if (testIdx !== -1) expect(srcIdx).toBeLessThan(testIdx);
+  });
+
+  test("supports glob pattern: *.controller.ts", () => {
+    write("src/UserController.ts", "x");
+    write("src/AuthController.ts", "x");
+    write("src/UserService.ts", "x");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("find_file", { pattern: "*Controller.ts" }, idx, tmpDir);
+    expect(result).toContain("UserController.ts");
+    expect(result).toContain("AuthController.ts");
+    expect(result).not.toContain("UserService.ts");
+  });
 });
 
 describe("dispatchTool — notes / forget", () => {
