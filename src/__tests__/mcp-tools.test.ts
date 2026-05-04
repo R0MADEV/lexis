@@ -1,0 +1,179 @@
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { indexProject } from "../core/indexer";
+import { dispatchTool } from "../mcp/server";
+
+let tmpDir: string;
+
+function write(rel: string, content: string) {
+  const abs = path.join(tmpDir, rel);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, content);
+}
+
+beforeEach(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "lexis-mcp-tools-test-"));
+});
+
+afterEach(() => {
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+describe("dispatchTool — search_code", () => {
+  test("finds a symbol by name", () => {
+    write("src/auth.ts", `
+export class AuthService {
+  login(user: string) { return true; }
+}
+`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("search_code", { query: "AuthService" }, idx, tmpDir);
+    expect(result).toContain("AuthService");
+  });
+
+  test("returns no-results message for unknown query", () => {
+    write("src/a.ts", "export const known = 1;");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("search_code", { query: "xyzNonExistent12345" }, idx, tmpDir);
+    expect(result.toLowerCase()).toMatch(/no.*results|no matches|no se encontraron/i);
+  });
+
+  test("respects output='files' mode", () => {
+    write("src/payments.ts", `export class PaymentProcessor { charge() {} }`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("search_code", { query: "PaymentProcessor", output: "files" }, idx, tmpDir);
+    expect(result).toContain("payments.ts");
+    expect(result).not.toContain("class PaymentProcessor");
+  });
+
+  test("respects output='count' mode", () => {
+    write("src/a.ts", "export function foo() {}\nexport function bar() {}\nexport function baz() {}");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("search_code", { query: "function", output: "count" }, idx, tmpDir);
+    expect(result).toMatch(/\d+/);
+  });
+});
+
+describe("dispatchTool — get_symbol", () => {
+  test("returns implementation of an exact symbol", () => {
+    write("src/a.ts", `
+export class Foo {
+  bar() {
+    return 42;
+  }
+}
+`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("get_symbol", { name: "Foo" }, idx, tmpDir);
+    expect(result).toContain("class Foo");
+    expect(result).toContain("bar");
+  });
+
+  test("handles unknown symbol gracefully", () => {
+    write("src/a.ts", "export const x = 1;");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("get_symbol", { name: "TotallyUnknown" }, idx, tmpDir);
+    expect(result.toLowerCase()).toMatch(/not found|no.*found|sin.*encontrar/i);
+  });
+});
+
+describe("dispatchTool — read_file", () => {
+  test("reads a slice of a file", () => {
+    const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
+    write("src/big.ts", lines);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "read_file",
+      { path: "src/big.ts", offset: 10, limit: 5 },
+      idx,
+      tmpDir,
+    );
+    expect(result).toContain("line 10");
+    expect(result).toContain("line 14");
+    expect(result).not.toContain("line 30");
+  });
+
+  test("handles non-existent file gracefully", () => {
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "read_file",
+      { path: "src/does-not-exist.ts", offset: 1, limit: 5 },
+      idx,
+      tmpDir,
+    );
+    expect(result.toLowerCase()).toMatch(/could not|not.*found|error|cannot/i);
+  });
+});
+
+describe("dispatchTool — list_symbols", () => {
+  test("lists all symbols in the project", () => {
+    write("src/a.ts", "export function alpha() {}\nexport function beta() {}");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("list_symbols", {}, idx, tmpDir);
+    expect(result).toContain("alpha");
+    expect(result).toContain("beta");
+  });
+
+  test("filters by file_filter", () => {
+    write("src/a.ts", "export function inA() {}");
+    write("src/b.ts", "export function inB() {}");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("list_symbols", { file_filter: "a.ts" }, idx, tmpDir);
+    expect(result).toContain("inA");
+    expect(result).not.toContain("inB");
+  });
+});
+
+describe("dispatchTool — find_file", () => {
+  test("finds files by name pattern", () => {
+    write("src/auth/login.ts", "export const x = 1;");
+    write("src/auth/logout.ts", "export const y = 2;");
+    write("src/payments.ts", "export const z = 3;");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("find_file", { pattern: "auth" }, idx, tmpDir);
+    expect(result).toContain("login.ts");
+    expect(result).toContain("logout.ts");
+    expect(result).not.toContain("payments.ts");
+  });
+});
+
+describe("dispatchTool — notes / forget", () => {
+  test("note tool adds and notes tool retrieves", () => {
+    const idx = indexProject(tmpDir, null);
+    const addResult = dispatchTool(
+      "note",
+      { content: "Found a tricky bug in the auth flow today", tags: ["bug", "auth"] },
+      idx,
+      tmpDir,
+    );
+    expect(addResult.toLowerCase()).toMatch(/saved|note|recorded/i);
+
+    const recallResult = dispatchTool("notes", { query: "tricky" }, idx, tmpDir);
+    expect(recallResult).toContain("tricky bug in the auth flow");
+  });
+
+  test("forget removes a note", () => {
+    const idx = indexProject(tmpDir, null);
+    dispatchTool(
+      "note",
+      { content: "Marked for deletion in this test scenario", tags: [] },
+      idx,
+      tmpDir,
+    );
+    const list = dispatchTool("notes", { query: "deletion" }, idx, tmpDir);
+    const idMatch = list.match(/\b([a-z0-9]{6})\b/);
+    if (!idMatch) throw new Error("Note id not found in: " + list);
+    const id = idMatch[1]!;
+    const forgetResult = dispatchTool("forget", { id }, idx, tmpDir);
+    expect(forgetResult.toLowerCase()).toMatch(/deleted|removed|forg/i);
+  });
+});
+
+describe("dispatchTool — unknown tool", () => {
+  test("returns an error message for unknown tool", () => {
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("nonexistent_tool", {}, idx, tmpDir);
+    expect(result.toLowerCase()).toMatch(/unknown|not.*found/i);
+  });
+});

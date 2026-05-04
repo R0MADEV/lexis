@@ -2431,7 +2431,7 @@ function execRecentChanges(
   return sections.join("\n\n");
 }
 
-function dispatchTool(
+export function dispatchTool(
   name: string,
   args: Record<string, unknown>,
   index: Index,
