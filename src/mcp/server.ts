@@ -545,11 +545,12 @@ function execSearchCode(
 
   log(`[search_code] query="${query}" output=${output} topK=${topK} depth=${depth} context=${context ?? "auto"}`);
 
-  const results = search(query, index, projectPath, topK, depth, intentOverride);
-  if (results.length === 0) {
+  const rawResults = search(query, index, projectPath, topK, depth, intentOverride);
+  if (rawResults.length === 0) {
     const suggestions = suggestSimilar(query, index, 5);
     return `No results found for "${query}".${formatSuggestions(suggestions, path.resolve(projectPath))}`;
   }
+  const results = rerankSearchResults(query, rawResults);
 
   if (output === "trace") {
     const projectRoot = path.resolve(projectPath);
@@ -943,6 +944,51 @@ function rankFiles(rawPattern: string, files: string[]): Array<{ file: string; s
 function baseFileName(file: string): string {
   const i = Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\"));
   return i === -1 ? file : file.slice(i + 1);
+}
+
+// Re-rank search() results by relevance for the user's query.
+// Boosts on top of the searcher's intrinsic score:
+//   + symbol name === query (case-insensitive)        → +500
+//   + symbol name === query (token-equivalent)        → +400
+//   + symbol name contains query                      → +200
+//   + filename basename matches query                 → +150
+//   + src/lib/app/core/cmd/pkg dir                    → +30
+//   - tests/spec/fixtures/docs/examples/vendor dir    → -40
+//
+// Keeps result count and content identical; only reorders.
+function rerankSearchResults<T extends SearchResult>(query: string, results: T[]): T[] {
+  if (results.length <= 1) return results;
+
+  const lowerQuery = query.toLowerCase();
+  const queryTokens = identTokens(query).join("");
+
+  const scored = results.map((r) => {
+    let boost = 0;
+
+    const symLower = r.symbol.name.toLowerCase();
+    const symTokens = identTokens(r.symbol.name).join("");
+
+    if (symLower === lowerQuery) boost += 500;
+    else if (queryTokens && symTokens === queryTokens) boost += 400;
+    else if (symLower.includes(lowerQuery)) boost += 200;
+    else if (queryTokens && symTokens.includes(queryTokens)) boost += 150;
+
+    const base = baseFileName(r.symbol.file).toLowerCase();
+    const baseStem = base.replace(/\.[^.]+$/, "");
+    if (baseStem === lowerQuery || baseStem.replace(/[-_.]/g, "") === queryTokens) {
+      boost += 150;
+    } else if (base.includes(lowerQuery)) {
+      boost += 60;
+    }
+
+    if (/[\/\\](src|lib|app|core|cmd|pkg|internal|api)[\/\\]/i.test(r.symbol.file)) boost += 30;
+    if (/[\/\\](tests?|spec|fixtures?|docs?|examples?|node_modules|vendor)[\/\\]/i.test(r.symbol.file)) boost -= 40;
+
+    return { result: r, score: r.score + boost };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map((s) => s.result);
 }
 
 // Tokenize an identifier-style string. UserController → ["user", "controller"];

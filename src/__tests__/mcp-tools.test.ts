@@ -53,6 +53,40 @@ export class AuthService {
     const result = dispatchTool("search_code", { query: "function", output: "count" }, idx, tmpDir);
     expect(result).toMatch(/\d+/);
   });
+
+  test("ranks exact symbol name match above partial matches", () => {
+    write("src/lib/AuthService.ts", "export class AuthService {\n  login() {}\n}");
+    write("src/utils/AuthServiceHelper.ts", "export class AuthServiceHelper {}");
+    write("src/handlers/AuthServiceFactory.ts", "export class AuthServiceFactory {}");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "search_code",
+      { query: "AuthService", output: "files", top_k: 10 },
+      idx,
+      tmpDir,
+    );
+    const lines = result.split("\n");
+    expect(lines[0]).toContain("AuthService.ts");
+    expect(lines[0]).not.toContain("Helper");
+    expect(lines[0]).not.toContain("Factory");
+  });
+
+  test("ranks src/ over tests/", () => {
+    write("src/PaymentProcessor.ts", "export class PaymentProcessor { charge() {} }");
+    write("tests/PaymentProcessor.test.ts", "// PaymentProcessor tests");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "search_code",
+      { query: "PaymentProcessor", output: "files", top_k: 10 },
+      idx,
+      tmpDir,
+    );
+    const lines = result.split("\n").filter((l) => l.length > 0);
+    const srcIdx = lines.findIndex((l) => l.includes("src") && !l.includes("tests"));
+    const testIdx = lines.findIndex((l) => l.includes("tests"));
+    expect(srcIdx).toBeGreaterThanOrEqual(0);
+    if (testIdx !== -1) expect(srcIdx).toBeLessThan(testIdx);
+  });
 });
 
 describe("dispatchTool — get_symbol", () => {

@@ -15,7 +15,7 @@ const program = new Command();
 program
   .name("lexis")
   .description("Lexical + structural code retrieval for LLMs. MCP server for Claude Code.")
-  .version("0.5.0");
+  .version("0.5.1");
 
 program
   .command("setup [path]")
