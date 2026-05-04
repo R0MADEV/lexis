@@ -13,19 +13,28 @@ type ClientId =
 interface ClientSpec {
   id: ClientId;
   label: string;
-  install: (mcpName: string, cmd: string, args: string[]) => string;  // human instructions
-  autoInstall?: (mcpName: string, cmd: string, args: string[]) => { ok: boolean; msg: string };
+  install: (mcpName: string, cmd: string, args: string[], isGlobal?: boolean) => string;
+  autoInstall?: (mcpName: string, cmd: string, args: string[], projectPath: string, isGlobal?: boolean) => { ok: boolean; msg: string };
 }
 
 const CLIENTS: ClientSpec[] = [
   {
     id: "claude-code",
     label: "Claude Code",
-    install: (name, cmd, args) => `claude mcp add ${name} -- ${cmd} ${args.join(" ")}`,
-    autoInstall: (name, cmd, args) => {
-      const r = spawnSync("claude", ["mcp", "add", name, "--", cmd, ...args], { stdio: "inherit" });
+    install: (name, cmd, args, isGlobal) => {
+      const scopeFlag = isGlobal ? "--scope user " : "";
+      return `claude mcp add ${scopeFlag}${name} -- ${cmd} ${args.join(" ")}`;
+    },
+    autoInstall: (name, cmd, args, projectPath, isGlobal) => {
+      // Global: register at user scope, available in any project automatically.
+      // Per-project: register from the project dir so it lives in that project's local scope.
+      const cliArgs = isGlobal
+        ? ["mcp", "add", "--scope", "user", name, "--", cmd, ...args]
+        : ["mcp", "add", name, "--", cmd, ...args];
+      const opts = isGlobal ? { stdio: "inherit" as const } : { stdio: "inherit" as const, cwd: projectPath };
+      const r = spawnSync("claude", cliArgs, opts);
       return r.status === 0
-        ? { ok: true,  msg: "Registered with Claude Code." }
+        ? { ok: true,  msg: isGlobal ? "Registered with Claude Code (user scope)." : "Registered with Claude Code." }
         : { ok: false, msg: "claude CLI not found or failed." };
     },
   },
@@ -109,33 +118,50 @@ function findClient(id: string): ClientSpec | undefined {
 }
 
 export async function setupCommand(
-  projectPath: string,
-  opts: { name?: string; client?: string; auto?: boolean; all?: boolean }
+  projectPath: string | undefined,
+  opts: { name?: string; client?: string; auto?: boolean; all?: boolean; global?: boolean }
 ): Promise<void> {
-  const abs = path.resolve(projectPath);
-  if (!fs.existsSync(abs)) {
-    console.error(`Path does not exist: ${abs}`);
-    process.exit(1);
-  }
+  const isGlobal = !!opts.global;
 
-  // 1. Index (incremental)
-  console.log(`\n📦 Indexing ${abs} ...`);
-  const previous = loadIndex(abs);
-  const index = indexProject(abs, previous);
-  saveIndex(index, abs);
-  console.log(`   ${index.symbols.length} symbols across ${index.files.length} files`);
-  console.log(`   stored in ${projectStorageDir(abs)}`);
-
-  // 2. Resolve the binary command. If installed globally, "lexis" is on $PATH.
-  // If running from a clone (this dist), use the absolute path so configs are portable.
+  // Resolve binary command — same for both modes
   const isGlobalBin = process.argv[1]?.includes(`${path.sep}node_modules${path.sep}`);
   const cmd = isGlobalBin ? "lexis" : process.argv[1] ?? "lexis";
-  const args = ["mcp", "--path", abs];
 
-  const projectName = opts.name ?? path.basename(abs);
-  const mcpName = `lexis-${projectName.toLowerCase().replace(/[^a-z0-9-]/g, "-")}`;
+  let abs = "";
+  let mcpName: string;
+  let args: string[];
 
-  // 3. Decide which clients to print/install
+  if (isGlobal) {
+    // Global mode: register a single MCP that auto-detects the project from cwd at runtime.
+    // No upfront indexing — the server indexes any project on first connection.
+    mcpName = opts.name ?? "lexis";
+    args = ["mcp"]; // no --path, server uses process.cwd()
+    console.log(`\n📦 Setting up Lexis at user level — works in any project automatically.`);
+  } else {
+    // Per-project mode: needs a path, indexes upfront for instant first query.
+    if (!projectPath) {
+      console.error("Path required (or use --global for user-level setup).");
+      process.exit(1);
+    }
+    abs = path.resolve(projectPath);
+    if (!fs.existsSync(abs)) {
+      console.error(`Path does not exist: ${abs}`);
+      process.exit(1);
+    }
+
+    console.log(`\n📦 Indexing ${abs} ...`);
+    const previous = loadIndex(abs);
+    const index = indexProject(abs, previous);
+    saveIndex(index, abs);
+    console.log(`   ${index.symbols.length} symbols across ${index.files.length} files`);
+    console.log(`   stored in ${projectStorageDir(abs)}`);
+
+    args = ["mcp", "--path", abs];
+    const projectName = opts.name ?? path.basename(abs);
+    mcpName = `lexis-${projectName.toLowerCase().replace(/[^a-z0-9-]/g, "-")}`;
+  }
+
+  // Decide which clients to print/install
   const targets: ClientSpec[] =
     opts.all       ? CLIENTS :
     opts.client    ? (findClient(opts.client) ? [findClient(opts.client)!] : []) :
@@ -147,23 +173,26 @@ export async function setupCommand(
     process.exit(1);
   }
 
-  // 4. Auto-install only when --auto AND a single client AND that client supports it
+  // Auto-install only when --auto AND a single client AND that client supports it
   if (opts.auto && targets.length === 1 && targets[0]!.autoInstall) {
     const t = targets[0]!;
-    console.log(`\n🔌 Auto-registering with ${t.label}...`);
-    const r = t.autoInstall!(mcpName, cmd, args);
+    console.log(`\n🔌 Auto-registering with ${t.label}${isGlobal ? " (user scope)" : ""}...`);
+    const r = t.autoInstall!(mcpName, cmd, args, abs, isGlobal);
     console.log(r.ok ? `✅ ${r.msg}` : `⚠️  ${r.msg}`);
     if (!r.ok) {
-      console.log(`\nManual:\n   ${t.install(mcpName, cmd, args)}\n`);
+      console.log(`\nManual:\n   ${t.install(mcpName, cmd, args, isGlobal)}\n`);
+    }
+    if (isGlobal) {
+      console.log(`\nOpen any project in ${t.label} — Lexis is now available everywhere.`);
     }
     return;
   }
 
-  // 5. Print instructions
-  console.log(`\n✅ Index ready. To enable in your AI client:\n`);
+  // Print instructions
+  console.log(`\n✅ ${isGlobal ? "Ready" : "Index ready"}. To enable in your AI client:\n`);
   for (const t of targets) {
     console.log(`── ${t.label} ────────────────────────────────────`);
-    console.log(t.install(mcpName, cmd, args));
+    console.log(t.install(mcpName, cmd, args, isGlobal));
     console.log("");
   }
 
@@ -172,11 +201,12 @@ export async function setupCommand(
     console.log(`Use --client <id> for specific instructions, or --all to print all.`);
   }
 
-  console.log(`\n── Test it ──────────────────────────────────────`);
-  console.log(`Once registered, paste this into your AI client:\n`);
-  console.log(`  Use lexis tools to explore the ${projectName} project.`);
-  console.log(`  Start with list_entrypoints to understand the structure,`);
-  console.log(`  then search_code for anything specific.\n`);
+  if (!isGlobal) {
+    console.log(`\n── Test it ──────────────────────────────────────`);
+    console.log(`Once registered, paste this into your AI client:\n`);
+    console.log(`  Use lexis tools to explore this project.`);
+    console.log(`  Start with list_entrypoints to understand the structure.\n`);
+  }
 }
 
 export function listClientsCommand(): void {

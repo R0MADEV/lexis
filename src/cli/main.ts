@@ -18,13 +18,14 @@ program
   .version("0.2.0");
 
 program
-  .command("setup <path>")
-  .description("One-shot: index a project and print MCP install instructions for any AI client")
-  .option("-n, --name <name>", "Override the MCP server name (default: derived from folder name)")
+  .command("setup [path]")
+  .description("Set up Lexis MCP. Use --global for user-level setup (works in any project), or pass a path for project-specific setup with upfront indexing.")
+  .option("-n, --name <name>", "Override the MCP server name (default: 'lexis' for global, folder name for project)")
   .option("-c, --client <id>", "Target client: claude-code, cursor, continue, cline, roo, goose, zed, opencode, gemini-cli, windsurf")
   .option("--all", "Print install instructions for ALL supported clients")
   .option("--auto", "Auto-register (only supported for claude-code via the `claude` CLI)")
-  .action(async (projectPath: string, opts: { name?: string; client?: string; auto?: boolean; all?: boolean }) => {
+  .option("--global", "Register at user scope — works in any project automatically (recommended)")
+  .action(async (projectPath: string | undefined, opts: { name?: string; client?: string; auto?: boolean; all?: boolean; global?: boolean }) => {
     await setupCommand(projectPath, opts);
   });
 
