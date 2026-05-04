@@ -4,25 +4,31 @@ import { LexisTool } from "../../core/chunker";
 // 👇 provider dinámico: openai, deepseek, gemini o groq
 const PROVIDER = process.env["LEXIS_PROVIDER"] ?? "openai";
 
-// 👇 cliente configurable
-const client = new OpenAI({
-  apiKey:
-    PROVIDER === "deepseek"
-      ? process.env["DEEPSEEK_API_KEY"]
-      : PROVIDER === "gemini"
-        ? process.env["GEMINI_API_KEY"]
-        : PROVIDER === "groq"
-          ? process.env["GROQ_API_KEY"]
-          : process.env["OPENAI_API_KEY"],
-  baseURL:
-    PROVIDER === "deepseek"
-      ? "https://api.deepseek.com"
-      : PROVIDER === "gemini"
-        ? "https://generativelanguage.googleapis.com/v1beta/openai/"
-        : PROVIDER === "groq"
-          ? "https://api.groq.com/openai/v1"
-          : undefined,
-});
+// 👇 cliente lazy — solo se crea cuando se llama ask/askWithTools (comandos MCP no lo necesitan)
+let _client: OpenAI | null = null;
+function getClient(): OpenAI {
+  if (!_client) {
+    _client = new OpenAI({
+      apiKey:
+        PROVIDER === "deepseek"
+          ? process.env["DEEPSEEK_API_KEY"]
+          : PROVIDER === "gemini"
+            ? process.env["GEMINI_API_KEY"]
+            : PROVIDER === "groq"
+              ? process.env["GROQ_API_KEY"]
+              : process.env["OPENAI_API_KEY"],
+      baseURL:
+        PROVIDER === "deepseek"
+          ? "https://api.deepseek.com"
+          : PROVIDER === "gemini"
+            ? "https://generativelanguage.googleapis.com/v1beta/openai/"
+            : PROVIDER === "groq"
+              ? "https://api.groq.com/openai/v1"
+              : undefined,
+    });
+  }
+  return _client;
+}
 
 // 👇 modelo dinámico
 const MODEL =
@@ -45,7 +51,7 @@ function truncateToolResult(text: string): string {
 }
 
 export async function ask(prompt: string): Promise<string> {
-  const response = await client.chat.completions.create({
+  const response = await getClient().chat.completions.create({
     model: MODEL,
     messages: [{ role: "user", content: prompt }],
     max_tokens: 4096,
@@ -78,7 +84,7 @@ export async function askWithTools(
   for (let i = 0; i < MAX_TURNS; i++) {
     let response;
     try {
-      response = await client.chat.completions.create({
+      response = await getClient().chat.completions.create({
         model: MODEL,
         messages,
         tools: toolDefs,

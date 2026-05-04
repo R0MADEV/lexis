@@ -25,5 +25,5 @@ export async function indexCommand(projectPath: string, opts?: { full?: boolean 
 
   console.log(`Symbols: ${index.symbols.length}  Files: ${index.files.length}`);
   console.log(`Languages: ${topLangs}`);
-  console.log(`Saved: ${projectPath}/.lexis-index.json`);
+  console.log(`Saved: ${indexFilePath(projectPath)}`);
 }

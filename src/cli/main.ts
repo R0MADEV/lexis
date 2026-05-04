@@ -7,6 +7,7 @@ import { Command } from "commander";
 import { indexCommand } from "./commands/index";
 import { askCommand } from "./commands/ask";
 import { setupCommand, listClientsCommand } from "./commands/setup";
+import { initCommand } from "./commands/init";
 import { startMcpServer } from "../mcp/server";
 
 const program = new Command();
@@ -31,6 +32,11 @@ program
   .command("clients")
   .description("List supported MCP clients")
   .action(() => listClientsCommand());
+
+program
+  .command("init [path]")
+  .description("Optional: create CLAUDE.local.md with Lexis usage hints (gitignored)")
+  .action((projectPath?: string) => initCommand(projectPath ?? process.cwd()));
 
 program
   .command("index <path>")

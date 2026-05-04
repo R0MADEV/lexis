@@ -89,6 +89,32 @@ function err(id: number | string | null, code: number, message: string): void {
   send({ jsonrpc: "2.0", id, error: { code, message } });
 }
 
+const LEXIS_INSTRUCTIONS = `Lexis — lexical + structural code search.
+
+Use Lexis tools as your PRIMARY way to navigate this codebase. Do NOT read entire files when you can search.
+
+WORKFLOW (follow on first query):
+1. notes — recall context from previous sessions
+2. list_entrypoints — understand structure (routes, handlers, CLI commands)
+3. search_code — find symbols/code by keyword (compact output, ~50 tokens/result)
+4. get_symbol — get a function/class implementation by exact name
+5. read_file with offset/limit — only when you need a specific range
+
+RULES:
+- Default to output='compact'. Use 'content' only when you need 2+ full implementations.
+- For bugs: use search_code with context='bug' (auto depth=2, prioritizes callers + error handlers)
+- For features: use search_code with context='feature' (prioritizes types + patterns)
+- To follow a flow: use call_chain (upstream/downstream)
+- To assess change risk: use impact_analysis before refactoring
+- Save findings with note(content, tags, files) so future sessions don't re-discover them
+- If results seem stale or a recent file is missing, call reindex
+
+TOKEN BUDGET:
+- snippet (~15 tok) → orient
+- compact (default, ~50 tok) → standard
+- content (~500 tok) → full implementation, use sparingly
+- files / count → when you only need paths or a number`;
+
 const TOOLS = [
   {
     name: "search_code",
@@ -2579,7 +2605,8 @@ export function startMcpServer(projectPath: string): void {
         ok(id, {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "lexis", version: "0.1.0" },
+          serverInfo: { name: "lexis", version: "0.2.0" },
+          instructions: LEXIS_INSTRUCTIONS,
         });
         break;
 

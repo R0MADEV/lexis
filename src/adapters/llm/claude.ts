@@ -1,7 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { LexisTool } from "../../core/chunker";
 
-const client = new Anthropic();
+let _client: Anthropic | null = null;
+function getClient(): Anthropic {
+  if (!_client) _client = new Anthropic();
+  return _client;
+}
 const MODEL = process.env["LEXIS_MODEL_CLAUDE"] ?? "claude-sonnet-4-6";
 
 const MAX_TOOL_RESULT_TOKENS = parseInt(process.env["LEXIS_MAX_TOOL_RESULT_TOKENS"] ?? "15000");
@@ -15,7 +19,7 @@ function truncateToolResult(text: string): string {
 }
 
 export async function ask(prompt: string): Promise<string> {
-  const message = await client.messages.create({
+  const message = await getClient().messages.create({
     model: MODEL,
     max_tokens: 4096,
     messages: [{ role: "user", content: prompt }],
@@ -46,7 +50,7 @@ export async function askWithTools(
   for (let i = 0; i < MAX_TURNS; i++) {
     let response;
     try {
-      response = await client.messages.create({
+      response = await getClient().messages.create({
         model: MODEL,
         max_tokens: 4096,
         system: systemPrompt,
