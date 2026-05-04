@@ -66,7 +66,7 @@ function runRg(args: string[]): { stdout: string; stderr: string } {
 
 // Tools whose results are deterministic given the same args+index — safe to cache.
 // Excluded: read_file (cheap, mtime-sensitive), list_symbols & find_file (already index-only).
-const CACHEABLE = new Set(["search_code", "get_symbol", "find_references", "get_context", "find_writes", "git_context", "recent_changes", "call_chain", "list_entrypoints", "explain", "event_handlers", "impact_analysis", "config_lookup", "interface_implementations", "pattern_search", "tests_for", "hot_files", "dead_code", "investigate"]);
+const CACHEABLE = new Set(["search_code", "get_symbol", "find_references", "get_context", "find_writes", "git_context", "recent_changes", "call_chain", "list_entrypoints", "explain", "event_handlers", "impact_analysis", "config_lookup", "interface_implementations", "pattern_search", "tests_for", "hot_files", "dead_code", "investigate", "list_todos", "resolve_import"]);
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -478,6 +478,39 @@ const TOOLS = [
     name: "reindex",
     description: "Re-scan the project to pick up new or changed files since the last index. Call this if search results seem stale or a recently added file is not found.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "lint",
+    description: "Run the project's typechecker/linter and return only errors+warnings in compact format. Auto-detects: TypeScript (tsconfig.json), Go (go.mod), Rust (Cargo.toml), Python (pyproject.toml/setup.py), PHP (composer.json+phpstan), Ruby (Gemfile+rubocop). Returns the parsed errors only — saves you having to read raw compiler output.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path_filter: { type: "string", description: "Optional: only show errors in files containing this substring" },
+      },
+    },
+  },
+  {
+    name: "resolve_import",
+    description: "Given a file and an imported symbol, return the symbol's definition without you having to read the importing file. Saves a Read+grep round-trip. Supports TS/JS, Python, PHP, Rust, Java import syntax.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", description: "The file that imports the symbol (relative or absolute path)" },
+        symbol: { type: "string", description: "The imported symbol/identifier name" },
+      },
+      required: ["file", "symbol"],
+    },
+  },
+  {
+    name: "list_todos",
+    description: "List all TODO, FIXME, XXX, HACK markers in the project. Use to triage technical debt or check pending items in a specific area. Optional path_filter to narrow scope.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path_filter: { type: "string", description: "Optional: only show TODOs in files whose path contains this" },
+        limit: { type: "number", description: "Max results (default 50)" },
+      },
+    },
   },
   {
     name: "investigate",
@@ -1155,6 +1188,176 @@ function globToRegex(glob: string): RegExp {
     .replace(/\?/g, ".")
     .replace(/::DOUBLESTAR::/g, ".*");
   return new RegExp(re + "$", "i");
+}
+
+// Run the project's native linter/typechecker. Detects which by marker file
+// (tsconfig.json, go.mod, Cargo.toml, etc.) so it works across languages
+// without configuration.
+function execLint(
+  args: Record<string, unknown>,
+  projectPath: string
+): string {
+  const pathFilter = (args["path_filter"] as string | undefined)?.toLowerCase();
+  const exists = (rel: string) => fs.existsSync(path.join(projectPath, rel));
+
+  // Each entry: marker → command + args + parser hint
+  // Order matters: more-specific markers first.
+  const linters: Array<{
+    marker: string;
+    label: string;
+    cmd: string;
+    args: string[];
+    detect?: () => boolean;
+  }> = [
+    { marker: "tsconfig.json", label: "TypeScript", cmd: "npx", args: ["--no-install", "tsc", "--noEmit", "--pretty", "false"] },
+    { marker: "go.mod",        label: "Go",         cmd: "go",  args: ["vet", "./..."] },
+    { marker: "Cargo.toml",    label: "Rust",       cmd: "cargo", args: ["check", "--message-format=short"] },
+    { marker: "pyproject.toml",label: "Python",     cmd: "ruff", args: ["check", "."] },
+    { marker: "composer.json", label: "PHP",        cmd: "vendor/bin/phpstan", args: ["analyse", "--no-progress", "--error-format=raw"] },
+    { marker: "Gemfile",       label: "Ruby",       cmd: "bundle", args: ["exec", "rubocop", "--format", "simple"] },
+  ];
+
+  const detected = linters.find((l) => exists(l.marker));
+  if (!detected) {
+    return "No linter detected. Lexis looked for: tsconfig.json, go.mod, Cargo.toml, pyproject.toml, composer.json, Gemfile.";
+  }
+
+  const r = spawnSync(detected.cmd, detected.args, {
+    cwd: projectPath,
+    encoding: "utf-8",
+    timeout: 60_000,
+  });
+
+  // Some linters write to stderr; combine.
+  const output = ((r.stdout ?? "") + (r.stderr ?? "")).trim();
+
+  if (r.error && (r.error as NodeJS.ErrnoException).code === "ENOENT") {
+    return `${detected.label} project detected, but the linter "${detected.cmd}" is not installed.\nInstall it to run \`lint\` automatically. Marker: ${detected.marker}`;
+  }
+
+  if (!output) {
+    return `${detected.label}: no errors.`;
+  }
+
+  // Parse the output into compact lines: filtering out non-actionable noise.
+  // Keep lines that look like a diagnostic: file:line[:col] something.
+  const projectRoot = path.resolve(projectPath);
+  const diagnosticRe = /^(.+?\.\w+):(\d+)(?::(\d+))?\s*[-:]?\s*(error|warning|note|info)?\s*[:.]?\s*(.+)$/i;
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const line of output.split("\n")) {
+    const m = line.match(diagnosticRe);
+    if (!m) continue;
+    const [, file, lineNum, col, kind, msg] = m;
+    const fileStr = file ?? "";
+    if (pathFilter && !fileStr.toLowerCase().includes(pathFilter)) continue;
+
+    const rel = path.isAbsolute(fileStr) ? path.relative(projectRoot, fileStr) : fileStr;
+    const key = `${rel}:${lineNum}:${col ?? "0"}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const k = kind ?? "error";
+    out.push(`${rel}:${lineNum}${col ? `:${col}` : ""}  [${k.toLowerCase()}] ${(msg ?? "").trim().slice(0, 200)}`);
+  }
+
+  if (out.length === 0) {
+    return `${detected.label}: no errors.`;
+  }
+
+  return `${detected.label} — ${out.length} issue(s):\n\n${out.slice(0, 100).join("\n")}${out.length > 100 ? `\n\n[${out.length - 100} more — use path_filter to narrow]` : ""}`;
+}
+
+// Resolve an imported symbol → its definition. Generic across languages.
+//
+// Strategy:
+//   1. Read the importing file
+//   2. Find a line that mentions the symbol AND looks like an import statement
+//      (universal patterns: import, from...import, use, require, include)
+//   3. Use the index to locate the definition (filtered to where the symbol exists)
+function execResolveImport(
+  args: Record<string, unknown>,
+  index: Index,
+  projectPath: string
+): string {
+  const file = args["file"] as string;
+  const symbol = args["symbol"] as string;
+  if (!file || !symbol) return "Error: 'file' and 'symbol' are required.";
+
+  const projectRoot = path.resolve(projectPath);
+  const resolvedFile = path.isAbsolute(file) ? file : path.resolve(projectRoot, file);
+
+  let content: string;
+  try { content = fs.readFileSync(resolvedFile, "utf-8"); }
+  catch { return `Could not read file: ${file}`; }
+
+  // Universal "is this line an import that mentions the symbol?" patterns.
+  // Each language's import syntax is regex-detectable without parsing.
+  const escSym = symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const importPatterns = [
+    new RegExp(`^\\s*import\\b.*\\b${escSym}\\b`, "m"),               // TS/JS: import {Foo} from / Java: import x.Foo
+    new RegExp(`^\\s*from\\s+\\S+\\s+import\\b.*\\b${escSym}\\b`, "m"), // Python: from x import Foo
+    new RegExp(`^\\s*use\\s+[\\w\\\\:.]*${escSym}\\b`, "m"),           // PHP: use App\Foo / Rust: use crate::Foo
+    new RegExp(`^\\s*(require|include|require_relative)\\b.*${escSym}`, "m"),  // Ruby/PHP/Node
+  ];
+
+  const isImported = importPatterns.some((re) => re.test(content));
+  if (!isImported) {
+    return `Symbol "${symbol}" is not imported in ${path.relative(projectRoot, resolvedFile)}.`;
+  }
+
+  // Find the definition in the index.
+  const def = getSymbol(symbol, undefined, index);
+  if (!def) {
+    return `Symbol "${symbol}" is imported but its definition was not found in the indexed code. May be from an external dependency (node_modules, vendor).`;
+  }
+
+  const relDef = path.relative(projectRoot, def.symbol.file);
+  const lineCount = def.body.split("\n").length;
+  return `IMPORTED IN: ${path.relative(projectRoot, resolvedFile)}\nDEFINED IN: ${relDef}:${def.symbol.lineStart}-${def.symbol.lineStart + lineCount - 1} [${def.symbol.type}]\n\n\`\`\`\n${def.body}\n\`\`\``;
+}
+
+// List TODO/FIXME/XXX/HACK markers via ripgrep. Compact output: file:line text.
+function execListTodos(
+  args: Record<string, unknown>,
+  projectPath: string
+): string {
+  const pathFilter = (args["path_filter"] as string | undefined)?.toLowerCase();
+  const limit = typeof args["limit"] === "number" ? args["limit"] : 50;
+
+  const rgArgs = [
+    "--line-number", "--no-heading", "--max-filesize", "200K",
+    "-e", "\\b(TODO|FIXME|XXX|HACK)\\b",
+    "--glob", "!node_modules/**", "--glob", "!vendor/**",
+    "--glob", "!.git/**", "--glob", "!dist/**", "--glob", "!build/**",
+    "--glob", "!**/*.lock", "--glob", "!**/*.min.*",
+    projectPath,
+  ];
+  const stdout = runRg(rgArgs).stdout;
+  if (!stdout.trim()) return "No TODOs/FIXMEs found.";
+
+  const projectRoot = path.resolve(projectPath);
+  const lines = stdout.trim().split("\n");
+  const filtered: string[] = [];
+
+  for (const line of lines) {
+    const m = line.match(/^(.+?):(\d+):(.*)$/);
+    if (!m) continue;
+    const [, file, lineNum, content] = m;
+    if (pathFilter && !(file ?? "").toLowerCase().includes(pathFilter)) continue;
+
+    const rel = path.relative(projectRoot, file ?? "");
+    const trimmed = (content ?? "").trim().slice(0, 120);
+    filtered.push(`${rel}:${lineNum}  ${trimmed}`);
+    if (filtered.length >= limit) break;
+  }
+
+  if (filtered.length === 0) return "No TODOs/FIXMEs found matching the filter.";
+
+  const overflow = lines.length - filtered.length;
+  const body = formatPathList(filtered);
+  return overflow > 0 ? `${body}\n\n[${overflow} more — refine path_filter]` : body;
 }
 
 // All-in-one investigation: definition + references + tests, deduplicated.
@@ -2897,7 +3100,9 @@ export function dispatchTool(
   index: Index,
   projectPath: string
 ): string {
-  const cacheKey = CACHEABLE.has(name) ? `${name}:${stableStringify(args)}` : null;
+  // Include projectPath so multiple MCP instances or tests against different
+  // projects don't share results. (Not common in production but caught by tests.)
+  const cacheKey = CACHEABLE.has(name) ? `${projectPath}:${name}:${stableStringify(args)}` : null;
   if (cacheKey) {
     const cached = cacheGet(cacheKey);
     if (cached !== null) {
@@ -2934,6 +3139,9 @@ export function dispatchTool(
     case "notes":            result = execNotes(args, projectPath); break;
     case "forget":           result = execForget(args, projectPath); break;
     case "investigate":      result = execInvestigate(args, index, projectPath); break;
+    case "list_todos":       result = execListTodos(args, projectPath); break;
+    case "resolve_import":   result = execResolveImport(args, index, projectPath); break;
+    case "lint":             result = execLint(args, projectPath); break;
     default:                 return `Unknown tool: ${name}`;
   }
 

@@ -301,6 +301,117 @@ describe("dispatchTool — notes / forget", () => {
   });
 });
 
+describe("dispatchTool — lint (multi-language detection)", () => {
+  test("detects TypeScript project from tsconfig.json", () => {
+    write("tsconfig.json", `{"compilerOptions": {"strict": true, "noEmit": true}}`);
+    write("src/a.ts", "export const x: number = 1;");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("lint", {}, idx, tmpDir);
+    // Should at least identify the project type, even if tsc isn't installed locally
+    expect(result.toLowerCase()).toMatch(/typescript|tsc|no errors|not installed|cannot/);
+  });
+
+  test("returns 'no linter detected' for empty project", () => {
+    write("README.md", "# empty");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("lint", {}, idx, tmpDir);
+    expect(result.toLowerCase()).toMatch(/no linter|not detected|unknown project/);
+  });
+
+  test("detects Go project from go.mod", () => {
+    write("go.mod", "module example.com/foo\ngo 1.21");
+    write("main.go", "package main\nfunc main() {}");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("lint", {}, idx, tmpDir);
+    expect(result.toLowerCase()).toMatch(/go|vet|no errors|not installed/);
+  });
+});
+
+describe("dispatchTool — resolve_import (multi-language)", () => {
+  test("TypeScript/JS: resolves named import", () => {
+    write("src/lib/AuthService.ts", "export class AuthService { login() {} }");
+    write("src/handlers/userHandler.ts", `import { AuthService } from "../lib/AuthService";\nclass UserHandler {}`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "resolve_import",
+      { file: "src/handlers/userHandler.ts", symbol: "AuthService" },
+      idx, tmpDir,
+    );
+    expect(result).toContain("AuthService.ts");
+    expect(result).toContain("class AuthService");
+  });
+
+  test("Python: resolves 'from x import Y'", () => {
+    write("app/services/auth.py", "class AuthService:\n    def login(self): pass");
+    write("app/handlers/user.py", "from app.services.auth import AuthService\nclass UserHandler: pass");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "resolve_import",
+      { file: "app/handlers/user.py", symbol: "AuthService" },
+      idx, tmpDir,
+    );
+    expect(result).toContain("auth.py");
+    expect(result).toContain("class AuthService");
+  });
+
+  test("PHP: resolves 'use App\\Foo'", () => {
+    write("src/Auth/AuthService.php", "<?php\nnamespace App\\Auth;\nclass AuthService {}");
+    write("src/Handler/UserHandler.php", "<?php\nuse App\\Auth\\AuthService;\nclass UserHandler {}");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "resolve_import",
+      { file: "src/Handler/UserHandler.php", symbol: "AuthService" },
+      idx, tmpDir,
+    );
+    expect(result).toContain("AuthService.php");
+  });
+
+  test("returns 'not imported' when symbol is not in the file's imports", () => {
+    write("src/a.ts", "export const a = 1;");
+    write("src/b.ts", "import { a } from './a';");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "resolve_import",
+      { file: "src/b.ts", symbol: "NeverImported" },
+      idx, tmpDir,
+    );
+    expect(result.toLowerCase()).toMatch(/not imported|not found/);
+  });
+});
+
+describe("dispatchTool — list_todos", () => {
+  test("finds TODO, FIXME, XXX, HACK markers across the project", () => {
+    write("src/a.ts", "// TODO: implement caching\nexport function x() {}");
+    write("src/b.ts", "/* FIXME: race condition */ export function y() {}");
+    write("src/c.ts", "// XXX: this is hacky\n// HACK: workaround for bug 123");
+    write("src/clean.ts", "// nothing to see here\nexport const z = 1;");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("list_todos", {}, idx, tmpDir);
+    expect(result).toMatch(/TODO/);
+    expect(result).toMatch(/FIXME/);
+    expect(result).toMatch(/XXX/);
+    expect(result).toMatch(/HACK/);
+    expect(result).toContain("implement caching");
+    expect(result).toContain("race condition");
+  });
+
+  test("filters by path substring", () => {
+    write("src/auth/login.ts", "// TODO: add 2FA");
+    write("src/payments/charge.ts", "// TODO: handle refunds");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("list_todos", { path_filter: "auth" }, idx, tmpDir);
+    expect(result).toContain("2FA");
+    expect(result).not.toContain("refunds");
+  });
+
+  test("returns empty-list message when no TODOs", () => {
+    write("src/clean.ts", "export const ok = 1;");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("list_todos", {}, idx, tmpDir);
+    expect(result.toLowerCase()).toMatch(/no todos|nothing|empty/);
+  });
+});
+
 describe("dispatchTool — auto-truncate huge results", () => {
   test("read_file truncates extremely long single results with marker", () => {
     // Generate a 500-line file
