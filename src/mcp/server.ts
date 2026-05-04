@@ -1193,31 +1193,46 @@ function globToRegex(glob: string): RegExp {
 // Run the project's native linter/typechecker. Detects which by marker file
 // (tsconfig.json, go.mod, Cargo.toml, etc.) so it works across languages
 // without configuration.
+// Hide tools that don't apply to the current project from `tools/list`.
+// Saves Claude a wasted call when, e.g., `lint` is invoked on a project
+// without a linter marker file. Keeps the tool list contextually relevant.
+function filterToolsForProject<T extends { name: string }>(tools: T[], projectPath: string): T[] {
+  const hasLinter = detectLinter(projectPath) !== null;
+  return tools.filter((t) => {
+    if (t.name === "lint" && !hasLinter) return false;
+    return true;
+  });
+}
+
+// Linter registry: marker file → command. Order matters (more-specific first).
+interface LinterSpec { marker: string; label: string; cmd: string; args: string[]; }
+
+const LINTERS: LinterSpec[] = [
+  { marker: "tsconfig.json", label: "TypeScript", cmd: "npx", args: ["--no-install", "tsc", "--noEmit", "--pretty", "false"] },
+  { marker: "go.mod",        label: "Go",         cmd: "go",  args: ["vet", "./..."] },
+  { marker: "Cargo.toml",    label: "Rust",       cmd: "cargo", args: ["check", "--message-format=short"] },
+  { marker: "pyproject.toml",label: "Python",     cmd: "ruff", args: ["check", "."] },
+  { marker: "composer.json", label: "PHP",        cmd: "vendor/bin/phpstan", args: ["analyse", "--no-progress", "--error-format=raw"] },
+  { marker: "Gemfile",       label: "Ruby",       cmd: "bundle", args: ["exec", "rubocop", "--format", "simple"] },
+];
+
+// Returns the matching linter for this project, or null if none applies.
+// Used both by execLint (to run it) and by listTools (to hide the tool from
+// Claude when no linter exists — saves a wasted tool call).
+export function detectLinter(projectPath: string): LinterSpec | null {
+  for (const l of LINTERS) {
+    if (fs.existsSync(path.join(projectPath, l.marker))) return l;
+  }
+  return null;
+}
+
 function execLint(
   args: Record<string, unknown>,
   projectPath: string
 ): string {
   const pathFilter = (args["path_filter"] as string | undefined)?.toLowerCase();
-  const exists = (rel: string) => fs.existsSync(path.join(projectPath, rel));
 
-  // Each entry: marker → command + args + parser hint
-  // Order matters: more-specific markers first.
-  const linters: Array<{
-    marker: string;
-    label: string;
-    cmd: string;
-    args: string[];
-    detect?: () => boolean;
-  }> = [
-    { marker: "tsconfig.json", label: "TypeScript", cmd: "npx", args: ["--no-install", "tsc", "--noEmit", "--pretty", "false"] },
-    { marker: "go.mod",        label: "Go",         cmd: "go",  args: ["vet", "./..."] },
-    { marker: "Cargo.toml",    label: "Rust",       cmd: "cargo", args: ["check", "--message-format=short"] },
-    { marker: "pyproject.toml",label: "Python",     cmd: "ruff", args: ["check", "."] },
-    { marker: "composer.json", label: "PHP",        cmd: "vendor/bin/phpstan", args: ["analyse", "--no-progress", "--error-format=raw"] },
-    { marker: "Gemfile",       label: "Ruby",       cmd: "bundle", args: ["exec", "rubocop", "--format", "simple"] },
-  ];
-
-  const detected = linters.find((l) => exists(l.marker));
+  const detected = detectLinter(projectPath);
   if (!detected) {
     return "No linter detected. Lexis looked for: tsconfig.json, go.mod, Cargo.toml, pyproject.toml, composer.json, Gemfile.";
   }
@@ -3285,7 +3300,7 @@ export function startMcpServer(projectPath: string): void {
         break;
 
       case "tools/list":
-        ok(id, { tools: TOOLS });
+        ok(id, { tools: filterToolsForProject(TOOLS, resolvedPath) });
         break;
 
       case "tools/call": {

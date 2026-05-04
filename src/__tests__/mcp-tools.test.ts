@@ -301,6 +301,34 @@ describe("dispatchTool — notes / forget", () => {
   });
 });
 
+describe("tool visibility — context-aware tool list", () => {
+  test("lint tool is HIDDEN when project has no linter marker", () => {
+    write("README.md", "# just docs, no project");
+    write("notes.txt", "stuff");
+    const idx = indexProject(tmpDir, null);
+    // We test through the public API: a project without linter shouldn't expose it.
+    // dispatchTool would still work (defensive), but the tool list filtering
+    // is what matters for `tools/list`. Validate the underlying detector.
+    const { detectLinter } = require("../mcp/server");
+    expect(detectLinter(tmpDir)).toBeNull();
+  });
+
+  test("lint tool is VISIBLE when tsconfig.json exists", () => {
+    write("tsconfig.json", `{"compilerOptions": {}}`);
+    const { detectLinter } = require("../mcp/server");
+    const linter = detectLinter(tmpDir);
+    expect(linter).not.toBeNull();
+    expect(linter?.label).toBe("TypeScript");
+  });
+
+  test("lint tool is VISIBLE when go.mod exists", () => {
+    write("go.mod", "module foo");
+    const { detectLinter } = require("../mcp/server");
+    const linter = detectLinter(tmpDir);
+    expect(linter?.label).toBe("Go");
+  });
+});
+
 describe("dispatchTool — lint (multi-language detection)", () => {
   test("detects TypeScript project from tsconfig.json", () => {
     write("tsconfig.json", `{"compilerOptions": {"strict": true, "noEmit": true}}`);
