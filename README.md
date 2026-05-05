@@ -1,8 +1,10 @@
 # lexis-mcp
 
-A code-search MCP server that gives Claude Code, Cursor, Windsurf and other AI assistants 28 specialized tools to navigate large codebases — without burning tokens.
+A code-search MCP server that gives AI coding assistants 28+ specialized tools to navigate large codebases — without burning tokens.
 
-**Result: ~80% fewer tokens per complex task.** A typical bug investigation drops from ~15,000 tokens to ~3,000.
+**Result: ~80% fewer tokens per complex task** (measured on real bug investigations in a 500k-line PHP codebase: ~15,000 tokens → ~3,000).
+
+> **Status:** Validated on **Claude Code** (the only client tested in real workflows so far). Should work with any standard MCP client (Cursor, Windsurf, Continue, Cline, Zed, etc.) but those are **untested**. Issues and contributions welcome.
 
 No vectors. No embeddings. No external services. Just ripgrep + AST symbol extraction + smart ranking.
 
@@ -39,20 +41,20 @@ LLMs are smart but not omniscient. When you ask Claude Code about a bug in a 100
 
 ## Supported clients
 
-10 MCP-compatible clients:
+> **Honest status:** Lexis is **validated on Claude Code** (real bug-fix and feature sessions in production projects). The other clients listed below should work because Lexis implements the standard MCP protocol — but **they have not been tested by us yet**. If you use one and it works (or breaks), please open an issue.
 
-| Client | Auto-register on install |
-|---|---|
-| Claude Code | ✅ |
-| Cursor | Manual (one config paste) |
-| Continue.dev | Manual |
-| Cline / Claude Dev | Manual |
-| Roo Code | Manual |
-| Goose (Block) | Manual |
-| Zed | Manual |
-| OpenCode | Manual |
-| Gemini CLI | Manual |
-| Windsurf (Codeium) | Manual |
+| Client | Auto-register on install | Validation status |
+|---|---|---|
+| Claude Code | ✅ | ✅ Tested in real workflows |
+| Cursor | Manual (one config paste) | ⚠️ Untested — should work |
+| Continue.dev | Manual | ⚠️ Untested — should work |
+| Cline / Claude Dev | Manual | ⚠️ Untested — should work |
+| Roo Code | Manual | ⚠️ Untested — should work |
+| Goose (Block) | Manual | ⚠️ Untested — should work |
+| Zed | Manual | ⚠️ Untested — should work |
+| OpenCode | Manual | ⚠️ Untested — should work |
+| Gemini CLI | Manual | ⚠️ Untested — should work |
+| Windsurf (Codeium) | Manual | ⚠️ Untested — should work |
 
 ```bash
 lexis clients              # list all

@@ -1,7 +1,7 @@
 {
   "name": "lexis-mcp",
   "version": "0.11.0",
-  "description": "Lexical + structural code retrieval for LLMs. MCP server compatible with Claude Code, Cursor, Continue, Cline, Goose, Zed, OpenCode, Gemini CLI, and any MCP client.",
+  "description": "Lexical + structural code search MCP server. ~80% fewer tokens per code task. Validated on Claude Code; should work with any MCP-compatible client (Cursor, Windsurf, Continue, Cline, Zed, etc. — untested, contributions welcome).",
   "main": "dist/cli/main.js",
   "bin": {
     "lexis": "dist/cli/main.js"
