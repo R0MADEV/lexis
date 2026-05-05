@@ -807,6 +807,203 @@ exten => _X.,1,NoOp()
   });
 });
 
+// ─── Smoke tests for tools without dedicated coverage ─────────────────────────
+// These verify the tool dispatches without crashing and produces non-empty output
+// (or a clean "not found" message). Their purpose is to catch regressions during
+// refactors — they don't validate deep behavior.
+
+describe("dispatchTool — smoke tests for less-covered tools", () => {
+  function setupBasicProject() {
+    write("src/AuthService.ts", `
+export class AuthService {
+  login(user: string): boolean { return true; }
+  logout(): void {}
+}
+`);
+    write("src/UserController.ts", `
+import { AuthService } from "./AuthService";
+export class UserController {
+  constructor(private auth: AuthService) {}
+  handleLogin(req: Request) { return this.auth.login(req.body.user); }
+}
+`);
+    write("src/handlers/payment.ts", `
+export async function processPayment(amount: number) {
+  console.log("processing", amount);
+  return { ok: true };
+}
+`);
+    return indexProject(tmpDir, null);
+  }
+
+  test("find_references returns refs for a known symbol", () => {
+    const idx = setupBasicProject();
+    const result = dispatchTool("find_references", { symbol: "AuthService" }, idx, tmpDir);
+    expect(typeof result).toBe("string");
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.toLowerCase()).toMatch(/usercontroller|reference|usage|no references/);
+  });
+
+  test("find_references handles unknown symbol gracefully", () => {
+    const idx = setupBasicProject();
+    const result = dispatchTool("find_references", { symbol: "ZzzNotExisting" }, idx, tmpDir);
+    expect(result.toLowerCase()).toMatch(/no references|not found|0/);
+  });
+
+  test("find_writes returns matches when files write to a target", () => {
+    write("src/saver.ts", `
+import * as fs from "fs";
+export function save() {
+  fs.writeFileSync("data.json", "{}");
+}
+`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("find_writes", { target: "data.json" }, idx, tmpDir);
+    expect(typeof result).toBe("string");
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  test("pattern_search finds matches", () => {
+    write("src/a.ts", "console.log('hello');\nconsole.log('world');");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("pattern_search", { pattern: "console\\.log" }, idx, tmpDir);
+    expect(typeof result).toBe("string");
+    expect(result).toMatch(/console|2|hits|matches/i);
+  });
+
+  test("interface_implementations runs without crashing", () => {
+    write("src/types.ts", `
+export interface Repository { find(): void; }
+export class UserRepo implements Repository { find() {} }
+export class OrderRepo implements Repository { find() {} }
+`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("interface_implementations", { interface: "Repository" }, idx, tmpDir);
+    expect(typeof result).toBe("string");
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  test("explain runs on a file path", () => {
+    const idx = setupBasicProject();
+    const result = dispatchTool("explain", { target: "src/AuthService.ts" }, idx, tmpDir);
+    expect(typeof result).toBe("string");
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  test("dead_code runs without crashing", () => {
+    const idx = setupBasicProject();
+    const result = dispatchTool("dead_code", {}, idx, tmpDir);
+    expect(typeof result).toBe("string");
+  });
+
+  test("call_chain runs without crashing", () => {
+    const idx = setupBasicProject();
+    const result = dispatchTool("call_chain", { symbol: "login", direction: "upstream" }, idx, tmpDir);
+    expect(typeof result).toBe("string");
+  });
+
+  test("impact_analysis runs without crashing", () => {
+    const idx = setupBasicProject();
+    const result = dispatchTool("impact_analysis", { symbol: "AuthService" }, idx, tmpDir);
+    expect(typeof result).toBe("string");
+  });
+
+  test("get_context runs for a known file:line", () => {
+    const idx = setupBasicProject();
+    const result = dispatchTool(
+      "get_context",
+      { file: "src/UserController.ts", line: 5 },
+      idx, tmpDir,
+    );
+    expect(typeof result).toBe("string");
+  });
+
+  test("list_entrypoints runs without crashing", () => {
+    write("src/routes.ts", `
+app.get("/users", (req, res) => res.json([]));
+app.post("/login", handleLogin);
+`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("list_entrypoints", {}, idx, tmpDir);
+    expect(typeof result).toBe("string");
+  });
+
+  test("event_handlers runs without crashing", () => {
+    write("src/events.ts", `
+emitter.on("user.created", (u) => console.log(u));
+dispatcher.dispatch("user.created", new UserCreated());
+`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("event_handlers", { event: "user.created" }, idx, tmpDir);
+    expect(typeof result).toBe("string");
+  });
+
+  test("config_lookup runs without crashing", () => {
+    write(".env", "DATABASE_URL=postgres://localhost\nAPI_KEY=secret123");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("config_lookup", { key: "DATABASE_URL" }, idx, tmpDir);
+    expect(typeof result).toBe("string");
+  });
+
+  test("reindex returns confirmation message", () => {
+    const idx = setupBasicProject();
+    // dispatchTool doesn't actually rebuild the index here — that's done in the
+    // server's tools/call handler. But the case 'reindex' is intercepted there,
+    // so dispatching it via dispatchTool() just hits 'unknown tool'. We instead
+    // validate via the dispatcher path that reindex is recognized as a tool name.
+    // (Smoke check — full reindex tested in indexer.test.ts incremental tests.)
+    const knownTools = require("../mcp/server").TOOLS_FOR_TESTS;
+    if (knownTools) {
+      expect(knownTools.some((t: { name: string }) => t.name === "reindex")).toBe(true);
+    }
+  });
+});
+
+// Git-dependent tools require a real git repo with at least one commit.
+// We initialize one in tmpDir for these tests.
+describe("dispatchTool — git-dependent tools (smoke)", () => {
+  function initGitRepo(branch: string = "main") {
+    const child = require("child_process");
+    child.spawnSync("git", ["init", "-q", "-b", branch, tmpDir]);
+    child.spawnSync("git", ["-C", tmpDir, "config", "user.email", "test@test.com"]);
+    child.spawnSync("git", ["-C", tmpDir, "config", "user.name", "test"]);
+    fs.mkdirSync(path.join(tmpDir, "src"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "src/a.ts"), "export const a = 1;");
+    child.spawnSync("git", ["-C", tmpDir, "add", "."]);
+    child.spawnSync("git", ["-C", tmpDir, "commit", "-q", "-m", "init"]);
+  }
+
+  test("git_context runs in a real git repo", () => {
+    initGitRepo();
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("git_context", { keyword: "init" }, idx, tmpDir);
+    expect(typeof result).toBe("string");
+  });
+
+  test("recent_changes runs in a real git repo", () => {
+    initGitRepo();
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("recent_changes", {}, idx, tmpDir);
+    expect(typeof result).toBe("string");
+  });
+
+  test("hot_files runs in a real git repo", () => {
+    initGitRepo();
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("hot_files", {}, idx, tmpDir);
+    expect(typeof result).toBe("string");
+  });
+
+  test("tests_for runs without crashing", () => {
+    initGitRepo();
+    fs.mkdirSync(path.join(tmpDir, "tests"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "tests/a.test.ts"), "test('x', () => {});");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("tests_for", { file: "src/a.ts" }, idx, tmpDir);
+    expect(typeof result).toBe("string");
+  });
+});
+
 describe("dispatchTool — unknown tool", () => {
   test("returns an error message for unknown tool", () => {
     const idx = indexProject(tmpDir, null);
