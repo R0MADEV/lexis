@@ -910,7 +910,7 @@ function execReadFile(
 // Approach: look at indentation levels. A signature at indent level N encloses
 // everything at indent > N below it. Stop at the file top or when we find an
 // outer-level (indent 0) class/function whose body the cursor falls in.
-function findEnclosingSignatures(lines: string[], offset: number): string[] {
+export function findEnclosingSignatures(lines: string[], offset: number): string[] {
   const SIG_RE = /^(\s*)(export\s+|public\s+|private\s+|protected\s+|static\s+|async\s+|abstract\s+|default\s+|pub\s+|suspend\s+|override\s+|readonly\s+|final\s+)*(class\s+\w|interface\s+\w|trait\s+\w|struct\s+\w|enum\s+\w|function\s+\w|fn\s+\w|func\s+\w|def\s+\w|sub\s+\w|defmodule\s+\w|module\s+\w|defp\s+\w|defmacro\s+\w|\w+\s*\([^)]*\)\s*[:{])/;
 
   // Reverse scan: collect candidate signatures with their indent
@@ -946,7 +946,7 @@ function findEnclosingSignatures(lines: string[], offset: number): string[] {
 // and tell the caller exactly how to resume. Prevents one tool call from
 // dumping 5000+ lines into the LLM context unnecessarily.
 const READ_FILE_MAX_CHARS = 24_000;  // ~6k tokens at ~4 chars/token
-function truncateIfExcessive(text: string, requestedOffset: number, lastReadLine: number): string {
+export function truncateIfExcessive(text: string, requestedOffset: number, lastReadLine: number): string {
   if (text.length <= READ_FILE_MAX_CHARS) return text;
   const cutoff = Math.floor(READ_FILE_MAX_CHARS * 0.9);
   const truncated = text.slice(0, cutoff);
@@ -1052,7 +1052,7 @@ function execFindFile(
 //   + bonus for shorter paths (likely more "primary" files)
 //   + bonus for src/lib/app/core dirs
 //   - penalty for tests/, vendor/, fixtures/, docs/
-function rankFiles(rawPattern: string, files: string[]): Array<{ file: string; score: number }> {
+export function rankFiles(rawPattern: string, files: string[]): Array<{ file: string; score: number }> {
   const isGlob = /[*?]/.test(rawPattern);
   const globRe = isGlob ? globToRegex(rawPattern) : null;
 
@@ -1101,7 +1101,7 @@ function rankFiles(rawPattern: string, files: string[]): Array<{ file: string; s
   return scored;
 }
 
-function baseFileName(file: string): string {
+export function baseFileName(file: string): string {
   const i = Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\"));
   return i === -1 ? file : file.slice(i + 1);
 }
@@ -1115,7 +1115,7 @@ function baseFileName(file: string): string {
 const MIN_COMPRESS_PATHS = 3;
 const MIN_COMPRESS_PREFIX_LEN = 12;
 
-function compressPaths(paths: string[]): { base: string; rels: string[] } | null {
+export function compressPaths(paths: string[]): { base: string; rels: string[] } | null {
   if (paths.length < MIN_COMPRESS_PATHS) return null;
 
   let prefix = paths[0] ?? "";
@@ -1134,7 +1134,7 @@ function compressPaths(paths: string[]): { base: string; rels: string[] } | null
   return { base, rels: paths.map((p) => p.slice(base.length)) };
 }
 
-function formatPathList(paths: string[]): string {
+export function formatPathList(paths: string[]): string {
   const c = compressPaths(paths);
   if (!c) return paths.join("\n");
   return `BASE: ${c.base}\n\n${c.rels.join("\n")}`;
@@ -1187,7 +1187,7 @@ function rerankSearchResults<T extends SearchResult>(query: string, results: T[]
 
 // Tokenize an identifier-style string. UserController → ["user", "controller"];
 // user-controller → ["user", "controller"]; my_var → ["my", "var"]
-function identTokens(s: string): string[] {
+export function identTokens(s: string): string[] {
   return s
     .replace(/[-_.\s]+/g, " ")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
@@ -1199,7 +1199,7 @@ function identTokens(s: string): string[] {
 
 // Convert a simple glob to a RegExp. Supports * (any chars except /), ** (any),
 // ? (single char), and literal segments. Insensitive on case.
-function globToRegex(glob: string): RegExp {
+export function globToRegex(glob: string): RegExp {
   const re = glob
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")  // escape regex specials except * and ?
     .replace(/\*\*/g, "::DOUBLESTAR::")
