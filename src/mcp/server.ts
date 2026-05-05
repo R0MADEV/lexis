@@ -19,7 +19,12 @@ const CACHE_MAX = 100;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const toolCache = new Map<string, { value: string; expires: number }>();
 
-function cacheGet(key: string): string | null {
+// Test helper — wipe LRU between unit tests so state doesn't leak.
+export function clearToolCacheForTests(): void {
+  toolCache.clear();
+}
+
+export function cacheGet(key: string): string | null {
   const hit = toolCache.get(key);
   if (!hit) return null;
   if (hit.expires < Date.now()) { toolCache.delete(key); return null; }
@@ -29,7 +34,7 @@ function cacheGet(key: string): string | null {
   return hit.value;
 }
 
-function cacheSet(key: string, value: string): void {
+export function cacheSet(key: string, value: string): void {
   if (toolCache.size >= CACHE_MAX) {
     const oldest = toolCache.keys().next().value;
     if (oldest !== undefined) toolCache.delete(oldest);
@@ -1224,7 +1229,7 @@ export function resetSessionState(): void {
   shownReadRanges.clear();
 }
 
-function readRangeKey(path: string, offset: number, limit: number): string {
+export function readRangeKey(path: string, offset: number, limit: number): string {
   return `${path}:${offset}:${limit}`;
 }
 

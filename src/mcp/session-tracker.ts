@@ -31,6 +31,34 @@ export function persistIfDue(_projectPath: string): void {
   // intentionally empty
 }
 
+// Test helper — reset module-level state between unit tests.
+export function resetSessionForTests(): void {
+  session.startedAt = Date.now();
+  session.toolCalls = 0;
+  session.searchQueries.clear();
+  session.symbolsInspected.clear();
+  session.filesRead.clear();
+  session.manualNotes = 0;
+  alreadySaved = false;
+}
+
+// Test helper — read internal state for assertions.
+export function getSessionStateForTests(): {
+  toolCalls: number;
+  searchQueries: string[];
+  symbolsInspected: string[];
+  filesRead: string[];
+  manualNotes: number;
+} {
+  return {
+    toolCalls: session.toolCalls,
+    searchQueries: [...session.searchQueries],
+    symbolsInspected: [...session.symbolsInspected],
+    filesRead: [...session.filesRead],
+    manualNotes: session.manualNotes,
+  };
+}
+
 export function trackToolCall(name: string, args: Record<string, unknown>): void {
   session.toolCalls++;
   switch (name) {

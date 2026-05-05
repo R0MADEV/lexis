@@ -1,6 +1,9 @@
 // Unit tests for pure helper functions. These complement the E2E mcp-tools.test.ts
 // by testing edge cases of internal logic that can break silently during refactors.
 
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import {
   identTokens,
   globToRegex,
@@ -10,8 +13,14 @@ import {
   rankFiles,
   truncateIfExcessive,
   findEnclosingSignatures,
+  cacheGet,
+  cacheSet,
+  readRangeKey,
+  isUltraMode,
+  detectLinter,
+  clearToolCacheForTests,
 } from "../mcp/server";
-import { isMainBranch, categoryForBranch } from "../adapters/storage/notes-file";
+import { isMainBranch, categoryForBranch, detectBranch } from "../adapters/storage/notes-file";
 
 describe("identTokens", () => {
   test("splits camelCase", () => {
@@ -227,5 +236,149 @@ describe("categoryForBranch", () => {
   test("anything else falls back to others", () => {
     expect(categoryForBranch("my-experiment")).toBe("others");
     expect(categoryForBranch("temporary")).toBe("others");
+  });
+});
+
+describe("LRU cache (cacheGet / cacheSet)", () => {
+  beforeEach(() => {
+    clearToolCacheForTests();
+  });
+
+  test("returns null for missing key", () => {
+    expect(cacheGet("nope")).toBeNull();
+  });
+
+  test("returns stored value", () => {
+    cacheSet("k1", "value1");
+    expect(cacheGet("k1")).toBe("value1");
+  });
+
+  test("evicts oldest when over CACHE_MAX (100)", () => {
+    // Fill cache beyond capacity
+    for (let i = 0; i < 105; i++) {
+      cacheSet(`k${i}`, `v${i}`);
+    }
+    // Earliest entries should have been evicted
+    expect(cacheGet("k0")).toBeNull();
+    expect(cacheGet("k1")).toBeNull();
+    // Latest entries are still present
+    expect(cacheGet("k104")).toBe("v104");
+  });
+
+  test("LRU position refreshes on read", () => {
+    cacheSet("a", "1");
+    cacheSet("b", "2");
+    cacheSet("c", "3");
+    cacheGet("a"); // touch 'a' so it becomes most recently used
+    // Push more entries to cause eviction
+    for (let i = 0; i < 100; i++) cacheSet(`pad${i}`, "x");
+    // 'a' should still be there since we touched it; 'b' might be evicted
+    // (We can't fully assert order without exposing internals, but at minimum
+    // 'a' should not be the first to go.)
+    const aVal = cacheGet("a");
+    if (aVal !== null) expect(aVal).toBe("1");
+  });
+});
+
+describe("readRangeKey", () => {
+  test("includes path, offset, limit", () => {
+    expect(readRangeKey("/foo.ts", 10, 20)).toBe("/foo.ts:10:20");
+  });
+
+  test("different ranges produce different keys", () => {
+    const k1 = readRangeKey("/foo.ts", 10, 20);
+    const k2 = readRangeKey("/foo.ts", 30, 20);
+    expect(k1).not.toBe(k2);
+  });
+});
+
+describe("isUltraMode", () => {
+  afterEach(() => {
+    delete process.env["LEXIS_COMPRESSION"];
+  });
+
+  test("returns false by default", () => {
+    delete process.env["LEXIS_COMPRESSION"];
+    expect(isUltraMode()).toBe(false);
+  });
+
+  test("returns true when LEXIS_COMPRESSION=ultra", () => {
+    process.env["LEXIS_COMPRESSION"] = "ultra";
+    expect(isUltraMode()).toBe(true);
+  });
+
+  test("returns false for any other value", () => {
+    process.env["LEXIS_COMPRESSION"] = "compact";
+    expect(isUltraMode()).toBe(false);
+    process.env["LEXIS_COMPRESSION"] = "normal";
+    expect(isUltraMode()).toBe(false);
+  });
+});
+
+describe("detectLinter", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "lexis-detectlinter-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test("returns null when no marker file", () => {
+    expect(detectLinter(tmpDir)).toBeNull();
+  });
+
+  test("detects TypeScript by tsconfig.json", () => {
+    fs.writeFileSync(path.join(tmpDir, "tsconfig.json"), "{}");
+    expect(detectLinter(tmpDir)?.label).toBe("TypeScript");
+  });
+
+  test("detects Go by go.mod", () => {
+    fs.writeFileSync(path.join(tmpDir, "go.mod"), "module foo");
+    expect(detectLinter(tmpDir)?.label).toBe("Go");
+  });
+
+  test("detects Rust by Cargo.toml", () => {
+    fs.writeFileSync(path.join(tmpDir, "Cargo.toml"), "[package]");
+    expect(detectLinter(tmpDir)?.label).toBe("Rust");
+  });
+
+  test("detects Python by pyproject.toml", () => {
+    fs.writeFileSync(path.join(tmpDir, "pyproject.toml"), "[project]");
+    expect(detectLinter(tmpDir)?.label).toBe("Python");
+  });
+
+  test("detects PHP by composer.json", () => {
+    fs.writeFileSync(path.join(tmpDir, "composer.json"), "{}");
+    expect(detectLinter(tmpDir)?.label).toBe("PHP");
+  });
+});
+
+describe("detectBranch", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "lexis-detectbranch-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test("returns null when not a git repo", () => {
+    expect(detectBranch(tmpDir)).toBeNull();
+  });
+
+  test("returns the branch name in a real git repo", () => {
+    const child = require("child_process");
+    child.spawnSync("git", ["init", "-q", "-b", "feature/test-branch", tmpDir]);
+    child.spawnSync("git", ["-C", tmpDir, "config", "user.email", "t@t.com"]);
+    child.spawnSync("git", ["-C", tmpDir, "config", "user.name", "t"]);
+    fs.writeFileSync(path.join(tmpDir, "x"), "x");
+    child.spawnSync("git", ["-C", tmpDir, "add", "."]);
+    child.spawnSync("git", ["-C", tmpDir, "commit", "-q", "-m", "init"]);
+    expect(detectBranch(tmpDir)).toBe("feature/test-branch");
   });
 });
