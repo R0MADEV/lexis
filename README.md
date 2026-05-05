@@ -39,6 +39,60 @@ LLMs are smart but not omniscient. When you ask Claude Code about a bug in a 100
 
 ---
 
+## Example: how a session looks
+
+**You** (in Claude Code, after `npm install -g lexis-mcp`):
+
+> *"There's a bug — the Kamailio listeners aren't reloading after updating ProxyTrunks. The code lives somewhere around `TrunksClient`."*
+
+**What Claude does internally** (visible as tool calls in your session):
+
+```
+1. mcp__lexis__notes(query="ProxyTrunk")
+   → Recovers prior findings on this branch (none yet, first session)
+
+2. mcp__lexis__search_code(query="reloadUacReg", context="bug")
+   → Returns 3 ranked results:
+       library/Ivoz/Kam/Infrastructure/Kamailio/TrunksClient.php:62
+       library/Ivoz/Provider/Domain/Service/ProxyTrunk/...:14
+       profiles/proxy/etc/kamailio/autoconf:129
+   (~150 tokens vs 2,500 reading the files)
+
+3. mcp__lexis__get_symbol(name="reloadUacReg")
+   → Returns the function body (~120 tokens, no surrounding boilerplate)
+
+4. mcp__lexis__call_chain(symbol="reloadUacReg", direction="upstream")
+   → "Called by ProxyTrunkLifecycleServiceCollection on_commit hook"
+
+5. mcp__lexis__find_writes(target="listeners.cfg")
+   → Returns: profiles/proxy/etc/kamailio/autoconf:129  printListeners()
+   → "writes from a Perl script, not from PHP runtime"
+
+6. Claude reasons → root cause found
+```
+
+**What Claude tells you:**
+
+> The fix-PROVIDER-2419 branch is misleading. `reloadUacReg()` only reloads the UAC cache in memory via RPC — it does NOT regenerate `listeners.cfg`. That file is written by the Perl `autoconf` script during deploy/setup, not at runtime. Two distinct mechanisms.
+
+**Then Claude saves it for next time:**
+
+```
+mcp__lexis__note(
+  content="The fix-PROVIDER-2419 branch only reloads UAC cache, not listeners.cfg.
+           Branch name is misleading. listeners.cfg is written by autoconf Perl
+           script at startup only, no runtime path.",
+  tags=["bug", "kamailio", "root-cause"],
+  files=["library/.../TrunksClient.php:62", "profiles/.../autoconf:129"]
+)
+```
+
+Six months later you reopen the branch — Claude reads that note immediately on session start (zero re-investigation).
+
+**Token totals for this session:** ~2,800 tokens with Lexis vs ~14,000 if Claude had read those files directly.
+
+---
+
 ## Supported clients
 
 > **Honest status:** Lexis is **validated on Claude Code** (real bug-fix and feature sessions in production projects). The other clients listed below should work because Lexis implements the standard MCP protocol — but **they have not been tested by us yet**. If you use one and it works (or breaks), please open an issue.
