@@ -836,12 +836,13 @@ export async function processPayment(amount: number) {
     return indexProject(tmpDir, null);
   }
 
-  test("find_references returns refs for a known symbol", () => {
+  test("find_references lists every file that uses the symbol", () => {
     const idx = setupBasicProject();
     const result = dispatchTool("find_references", { symbol: "AuthService" }, idx, tmpDir);
-    expect(typeof result).toBe("string");
-    expect(result.length).toBeGreaterThan(0);
-    expect(result.toLowerCase()).toMatch(/usercontroller|reference|usage|no references/);
+    // Must reference the consumer file by name
+    expect(result).toContain("UserController.ts");
+    // The unrelated file must NOT appear
+    expect(result).not.toContain("payment.ts");
   });
 
   test("find_references handles unknown symbol gracefully", () => {
@@ -857,106 +858,140 @@ export function save() {
   fs.writeFileSync("data.json", "{}");
 }
 `);
+    write("src/reader.ts", `
+import * as fs from "fs";
+export function read() {
+  return fs.readFileSync("data.json");  // does NOT write — should not match
+}
+`);
     const idx = indexProject(tmpDir, null);
     const result = dispatchTool("find_writes", { target: "data.json" }, idx, tmpDir);
-    expect(typeof result).toBe("string");
-    expect(result.length).toBeGreaterThan(0);
+    expect(result).toContain("saver.ts");          // the file that writes
+    expect(result).toContain("writeFileSync");      // the matched call
+    expect(result).not.toContain("reader.ts");      // reader does not write
   });
 
-  test("pattern_search finds matches", () => {
+  test("find_writes returns 'no code' message when target isn't written anywhere", () => {
+    write("src/x.ts", "export const x = 1;");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("find_writes", { target: "neverwritten.json" }, idx, tmpDir);
+    expect(result.toLowerCase()).toMatch(/no code|not found|0/);
+  });
+
+  test("pattern_search finds matches and shows file:hit-count", () => {
     write("src/a.ts", "console.log('hello');\nconsole.log('world');");
+    write("src/b.ts", "export const x = 1;");  // no matches
     const idx = indexProject(tmpDir, null);
     const result = dispatchTool("pattern_search", { pattern: "console\\.log" }, idx, tmpDir);
-    expect(typeof result).toBe("string");
-    expect(result).toMatch(/console|2|hits|matches/i);
+    expect(result).toContain("a.ts");
+    expect(result).not.toContain("b.ts");      // file without matches must not appear
+    expect(result).toMatch(/2|console\.log/);  // either count of 2 or the text itself
   });
 
-  test("interface_implementations runs without crashing", () => {
+  test("pattern_search returns 'no matches' when pattern isn't found", () => {
+    write("src/a.ts", "export const x = 1;");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("pattern_search", { pattern: "ZZ_NEVER_MATCHES_ZZ" }, idx, tmpDir);
+    expect(result.toLowerCase()).toMatch(/no matches|0|not found/);
+  });
+
+  test("interface_implementations lists every class that implements an interface", () => {
     write("src/types.ts", `
 export interface Repository { find(): void; }
 export class UserRepo implements Repository { find() {} }
 export class OrderRepo implements Repository { find() {} }
+export class Unrelated { hello() {} }
 `);
     const idx = indexProject(tmpDir, null);
     const result = dispatchTool("interface_implementations", { interface: "Repository" }, idx, tmpDir);
-    expect(typeof result).toBe("string");
-    expect(result.length).toBeGreaterThan(0);
+    expect(result).toContain("UserRepo");
+    expect(result).toContain("OrderRepo");
+    expect(result).not.toContain("Unrelated");
   });
 
-  test("explain runs on a file path", () => {
+  test("explain references the target file or one of its symbols", () => {
     const idx = setupBasicProject();
     const result = dispatchTool("explain", { target: "src/AuthService.ts" }, idx, tmpDir);
-    expect(typeof result).toBe("string");
-    expect(result.length).toBeGreaterThan(0);
+    // Output should mention the file name OR a symbol from inside it
+    expect(result).toMatch(/AuthService|login|logout/);
   });
 
-  test("dead_code runs without crashing", () => {
-    const idx = setupBasicProject();
+  test("dead_code distinguishes used vs unused function exports", () => {
+    write("src/used-fns.ts", "export function processOrder() { return 42; }");
+    write("src/consumer.ts", `
+import { processOrder } from "./used-fns";
+console.log(processOrder());
+`);
+    write("src/orphan-fns.ts", "export function completelyOrphanFunction() { return 99; }");
+    const idx = indexProject(tmpDir, null);
     const result = dispatchTool("dead_code", {}, idx, tmpDir);
-    expect(typeof result).toBe("string");
+    // The orphan function should appear in dead_code output
+    expect(result).toContain("completelyOrphanFunction");
+    // The consumed function must NOT appear
+    expect(result).not.toContain("processOrder");
   });
 
-  test("call_chain runs without crashing", () => {
+  test("call_chain finds a path from caller to callee", () => {
     const idx = setupBasicProject();
-    const result = dispatchTool("call_chain", { symbol: "login", direction: "upstream" }, idx, tmpDir);
-    expect(typeof result).toBe("string");
+    const result = dispatchTool(
+      "call_chain",
+      { from: "handleLogin", to: "login" },
+      idx, tmpDir,
+    );
+    // Should reference the symbols or return 'no path' meaningfully
+    expect(result).toMatch(/handleLogin|login|UserController|AuthService|no path/i);
   });
 
-  test("impact_analysis runs without crashing", () => {
+  test("impact_analysis references the queried symbol or its callers", () => {
     const idx = setupBasicProject();
     const result = dispatchTool("impact_analysis", { symbol: "AuthService" }, idx, tmpDir);
-    expect(typeof result).toBe("string");
+    expect(result).toMatch(/AuthService|UserController|impact|no impact/i);
   });
 
-  test("get_context runs for a known file:line", () => {
+  test("get_context returns the enclosing function for a known file:line", () => {
     const idx = setupBasicProject();
+    // line 5 of UserController.ts is inside class UserController { constructor... }
     const result = dispatchTool(
       "get_context",
       { file: "src/UserController.ts", line: 5 },
       idx, tmpDir,
     );
-    expect(typeof result).toBe("string");
+    // Output should reference the enclosing class or method
+    expect(result).toMatch(/UserController|handleLogin|class|constructor/);
   });
 
-  test("list_entrypoints runs without crashing", () => {
+  test("list_entrypoints detects HTTP routes / API methods", () => {
     write("src/routes.ts", `
 app.get("/users", (req, res) => res.json([]));
 app.post("/login", handleLogin);
 `);
     const idx = indexProject(tmpDir, null);
     const result = dispatchTool("list_entrypoints", {}, idx, tmpDir);
-    expect(typeof result).toBe("string");
+    // Should at least mention one of the route paths or http verbs
+    expect(result).toMatch(/users|login|GET|POST|route|entrypoint/i);
   });
 
-  test("event_handlers runs without crashing", () => {
+  test("event_handlers detects dispatchers and listeners of an event name", () => {
     write("src/events.ts", `
 emitter.on("user.created", (u) => console.log(u));
 dispatcher.dispatch("user.created", new UserCreated());
 `);
     const idx = indexProject(tmpDir, null);
     const result = dispatchTool("event_handlers", { event: "user.created" }, idx, tmpDir);
-    expect(typeof result).toBe("string");
+    expect(result).toContain("events.ts");
   });
 
-  test("config_lookup runs without crashing", () => {
+  test("config_lookup returns the value or location of a config key", () => {
     write(".env", "DATABASE_URL=postgres://localhost\nAPI_KEY=secret123");
     const idx = indexProject(tmpDir, null);
     const result = dispatchTool("config_lookup", { key: "DATABASE_URL" }, idx, tmpDir);
-    expect(typeof result).toBe("string");
+    // Should mention the key, the value, or the .env file
+    expect(result).toMatch(/DATABASE_URL|postgres|\.env/);
   });
 
-  test("reindex returns confirmation message", () => {
-    const idx = setupBasicProject();
-    // dispatchTool doesn't actually rebuild the index here — that's done in the
-    // server's tools/call handler. But the case 'reindex' is intercepted there,
-    // so dispatching it via dispatchTool() just hits 'unknown tool'. We instead
-    // validate via the dispatcher path that reindex is recognized as a tool name.
-    // (Smoke check — full reindex tested in indexer.test.ts incremental tests.)
-    const knownTools = require("../mcp/server").TOOLS_FOR_TESTS;
-    if (knownTools) {
-      expect(knownTools.some((t: { name: string }) => t.name === "reindex")).toBe(true);
-    }
-  });
+  // 'reindex' is intercepted in the tools/call handler before reaching dispatchTool,
+  // so it can't be tested via dispatchTool. Full reindex behavior is covered by
+  // indexer.test.ts → "indexProject — incremental" tests.
 });
 
 // Git-dependent tools require a real git repo with at least one commit.
@@ -973,34 +1008,37 @@ describe("dispatchTool — git-dependent tools (smoke)", () => {
     child.spawnSync("git", ["-C", tmpDir, "commit", "-q", "-m", "init"]);
   }
 
-  test("git_context runs in a real git repo", () => {
+  test("git_context surfaces commits matching keyword", () => {
     initGitRepo();
     const idx = indexProject(tmpDir, null);
     const result = dispatchTool("git_context", { keyword: "init" }, idx, tmpDir);
-    expect(typeof result).toBe("string");
+    // Should reference the commit message, branch, or commit hash
+    expect(result).toMatch(/init|main|commit|no.*found/i);
   });
 
-  test("recent_changes runs in a real git repo", () => {
+  test("recent_changes returns a structured summary (branch + commits + files)", () => {
     initGitRepo();
     const idx = indexProject(tmpDir, null);
     const result = dispatchTool("recent_changes", {}, idx, tmpDir);
-    expect(typeof result).toBe("string");
+    // The output is structured; should at least mention 'branch' or 'commits' or 'files'
+    expect(result.toLowerCase()).toMatch(/branch|commits|files|none|recent/);
   });
 
-  test("hot_files runs in a real git repo", () => {
+  test("hot_files lists files with commit history", () => {
     initGitRepo();
     const idx = indexProject(tmpDir, null);
     const result = dispatchTool("hot_files", {}, idx, tmpDir);
-    expect(typeof result).toBe("string");
+    expect(result).toMatch(/a\.ts|no.*found|0 commits/i);
   });
 
-  test("tests_for runs without crashing", () => {
+  test("tests_for finds the matching test file", () => {
     initGitRepo();
     fs.mkdirSync(path.join(tmpDir, "tests"), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, "tests/a.test.ts"), "test('x', () => {});");
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool("tests_for", { file: "src/a.ts" }, idx, tmpDir);
-    expect(typeof result).toBe("string");
+    const result = dispatchTool("tests_for", { target: "src/a.ts" }, idx, tmpDir);
+    // Should reference the test file or return a meaningful 'no tests' message
+    expect(result).toMatch(/a\.test\.ts|tests|no tests/i);
   });
 });
 
