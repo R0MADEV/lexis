@@ -248,7 +248,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        target: { type: "string", description: "Filename or path fragment to find writers for (e.g. 'listeners.cfg', '/etc/kamailio/')" },
+        target: { type: "string", description: "Filename or path fragment to find writers for (e.g. 'config.json', '/etc/myapp/')" },
       },
       required: ["target"],
     },
@@ -407,7 +407,7 @@ const TOOLS = [
       type: "object",
       properties: {
         content: { type: "string", description: "The finding (markdown supported, 1-3 paragraphs ideal)" },
-        tags:    { type: "array", items: { type: "string" }, description: "Topic tags (e.g. ['kamailio', 'bug', 'PROVIDER-2419'])" },
+        tags:    { type: "array", items: { type: "string" }, description: "Topic tags (e.g. ['auth', 'bug', 'JIRA-1234'])" },
         files:   { type: "array", items: { type: "string" }, description: "Related files (e.g. ['src/auth/login.ts:42'])" },
       },
       required: ["content"],
@@ -1108,7 +1108,7 @@ function baseFileName(file: string): string {
 
 // Detect the longest common path prefix (truncated to a path separator) so we
 // can print it once at the top of a result list and use short relative paths
-// for each entry. Saves ~30% of tokens in deep monorepos like ivozprovider.
+// for each entry. Saves ~30% of tokens in deep monorepos with long paths.
 //
 // Returns null when compression isn't worth it (fewer than 3 paths, prefix
 // too short to matter, or paths don't share a meaningful directory).
@@ -1911,7 +1911,7 @@ function execFindWrites(
   log(`[find_writes] target="${target}"`);
 
   // Match the basename and any path that ends with the target — handles both
-  // 'listeners.cfg' and '/etc/kamailio/proxytrunks/listeners.cfg' callers.
+  // 'config.json' and '/etc/myapp/config.json' callers.
   const targetEsc = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   // Patterns that indicate a write to `target` (cross-language)

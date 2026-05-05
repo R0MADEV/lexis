@@ -162,24 +162,24 @@ describe("dispatchTool — list_symbols", () => {
 
 describe("dispatchTool — path compression in output", () => {
   test("search_code with output='files' compresses common path prefix when 3+ results share it", () => {
-    write("library/Ivoz/Provider/Domain/Service/ProxyTrunkUpdate.php",
-      "<?php class ProxyTrunkUpdate {}");
-    write("library/Ivoz/Provider/Domain/Service/ProxyTrunkSync.php",
-      "<?php class ProxyTrunkSync {}");
-    write("library/Ivoz/Provider/Domain/Service/ProxyTrunkReload.php",
-      "<?php class ProxyTrunkReload {}");
+    write("src/app/domain/service/PaymentUpdate.php",
+      "<?php class PaymentUpdate {}");
+    write("src/app/domain/service/PaymentSync.php",
+      "<?php class PaymentSync {}");
+    write("src/app/domain/service/PaymentReload.php",
+      "<?php class PaymentReload {}");
     const idx = indexProject(tmpDir, null);
     const result = dispatchTool(
       "search_code",
-      { query: "ProxyTrunk", output: "files", top_k: 10 },
+      { query: "Payment", output: "files", top_k: 10 },
       idx,
       tmpDir,
     );
     // Should have a "BASE:" header and short relative paths
     expect(result).toMatch(/BASE:.+/);
-    expect(result).toContain("ProxyTrunkUpdate.php");
-    // The long Provider/Domain/Service prefix should appear only once (in BASE)
-    const longPathCount = (result.match(/library\/Ivoz\/Provider\/Domain\/Service/g) || []).length;
+    expect(result).toContain("PaymentUpdate.php");
+    // The long domain/service prefix should appear only once (in BASE)
+    const longPathCount = (result.match(/src\/app\/domain\/service/g) || []).length;
     expect(longPathCount).toBeLessThanOrEqual(1);
   });
 

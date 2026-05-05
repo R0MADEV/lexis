@@ -151,7 +151,7 @@ exten => _X.,1,Goto(globals,s,1)
 exten => _X.,1,NoOp()
 
 [add-headers-users]
-same => n,Set(PJSIP_HEADER(add,X-Info-DDI-Prefix)=12)
+same => n,Set(PJSIP_HEADER(add,X-Custom-Header)=12)
 `);
     const idx = indexProject(tmpDir, null);
     const names = idx.symbols.map((s) => s.name);

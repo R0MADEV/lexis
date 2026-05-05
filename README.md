@@ -43,53 +43,51 @@ LLMs are smart but not omniscient. When you ask Claude Code about a bug in a 100
 
 **You** (in Claude Code, after `npm install -g lexis-mcp`):
 
-> *"There's a bug — the Kamailio listeners aren't reloading after updating ProxyTrunks. The code lives somewhere around `TrunksClient`."*
+> *"There's a bug — config files aren't being regenerated after updating the database records. The fix is somewhere around `ServiceClient::reloadCache`."*
 
 **What Claude does internally** (visible as tool calls in your session):
 
 ```
-1. mcp__lexis__notes(query="ProxyTrunk")
+1. mcp__lexis__notes(query="reloadCache")
    → Recovers prior findings on this branch (none yet, first session)
 
-2. mcp__lexis__search_code(query="reloadUacReg", context="bug")
-   → Returns 3 ranked results:
-       library/Ivoz/Kam/Infrastructure/Kamailio/TrunksClient.php:62
-       library/Ivoz/Provider/Domain/Service/ProxyTrunk/...:14
-       profiles/proxy/etc/kamailio/autoconf:129
-   (~150 tokens vs 2,500 reading the files)
+2. mcp__lexis__search_code(query="reloadCache", context="bug")
+   → Returns 3 ranked results in ./src and ./scripts/
+   (~150 tokens vs 2,500 if Claude had read the files)
 
-3. mcp__lexis__get_symbol(name="reloadUacReg")
-   → Returns the function body (~120 tokens, no surrounding boilerplate)
+3. mcp__lexis__get_symbol(name="reloadCache")
+   → Returns just the function body (~120 tokens, no surrounding boilerplate)
 
-4. mcp__lexis__call_chain(symbol="reloadUacReg", direction="upstream")
-   → "Called by ProxyTrunkLifecycleServiceCollection on_commit hook"
+4. mcp__lexis__call_chain(symbol="reloadCache", direction="upstream")
+   → Identifies the lifecycle hook that triggers it
 
-5. mcp__lexis__find_writes(target="listeners.cfg")
-   → Returns: profiles/proxy/etc/kamailio/autoconf:129  printListeners()
-   → "writes from a Perl script, not from PHP runtime"
+5. mcp__lexis__find_writes(target="config/runtime.cfg")
+   → Returns: a deploy-time script that writes the file
+   → "config is written at deploy, not at runtime"
 
 6. Claude reasons → root cause found
 ```
 
 **What Claude tells you:**
 
-> The fix-PROVIDER-2419 branch is misleading. `reloadUacReg()` only reloads the UAC cache in memory via RPC — it does NOT regenerate `listeners.cfg`. That file is written by the Perl `autoconf` script during deploy/setup, not at runtime. Two distinct mechanisms.
+> The branch name suggests it fixes the config issue, but `reloadCache()` only reloads the in-memory cache via RPC — it does NOT regenerate the config file. The config is written by a deploy-time script, not at runtime. Two distinct mechanisms.
 
-**Then Claude saves it for next time:**
+**Then Claude saves the finding:**
 
 ```
 mcp__lexis__note(
-  content="The fix-PROVIDER-2419 branch only reloads UAC cache, not listeners.cfg.
-           Branch name is misleading. listeners.cfg is written by autoconf Perl
-           script at startup only, no runtime path.",
-  tags=["bug", "kamailio", "root-cause"],
-  files=["library/.../TrunksClient.php:62", "profiles/.../autoconf:129"]
+  content="reloadCache() only reloads in-memory state, not the on-disk config.
+           Config is written by deploy script, no runtime regeneration path exists.",
+  tags=["bug", "root-cause"],
+  files=["src/.../ServiceClient.php", "scripts/deploy/config-writer"]
 )
 ```
 
-Six months later you reopen the branch — Claude reads that note immediately on session start (zero re-investigation).
+Six months later you reopen the branch — Claude reads that note immediately on session start. **Zero re-investigation.**
 
 **Token totals for this session:** ~2,800 tokens with Lexis vs ~14,000 if Claude had read those files directly.
+
+> *(Numbers measured on a real ~500k LOC PHP/telecom codebase. Names anonymized.)*
 
 ---
 
@@ -246,10 +244,10 @@ Notes are categorized automatically by the current branch name:
 ```
 ~/.lexis/projects/<your-project>/
   bugs/
-    fix-PROVIDER-2419.md
-    PROVIDER-2530-kamailio-fantasma.md
+    fix-cache-invalidation.md
+    JIRA-1234-payment-flow.md
   features/
-    feature-X-Info-DDI-Prefix.md
+    feature-multi-tenant-auth.md
     feature-new-billing-flow.md
   others/
     no-branch.md          ← when not in a git repo
@@ -258,7 +256,7 @@ Notes are categorized automatically by the current branch name:
 
 | Branch pattern | Goes to |
 |---|---|
-| `fix/...`, `bugfix/...`, `hotfix/...`, `PROVIDER-1234`, `JIRA-...` | `bugs/` |
+| `fix/...`, `bugfix/...`, `hotfix/...`, `JIRA-1234`, `BUG-...` | `bugs/` |
 | `feature/...`, `feat/...` | `features/` |
 | `main`, `master`, `develop` | **No notes saved** (active work hasn't started) |
 | Anything else | `others/` |
@@ -271,13 +269,12 @@ Strong MCP instructions push Claude to save these at decisive moments.
 
 ```markdown
 ## 2026-05-04 18:49 · mch8wy
-**Branch:** fix/PROVIDER-2419
-**Tags:** kamailio, root-cause, bug
+**Branch:** fix/cache-invalidation
+**Tags:** root-cause, bug
 
-The fix-PROVIDER-2419 branch is misleading — it does NOT regenerate
-listeners.cfg. Only reloads the UAC cache via reloadUacReg(). The
-listeners.cfg file is written by the autoconf Perl script, only at
-service startup, not at runtime.
+The fix branch is misleading — it does NOT regenerate the on-disk config.
+Only reloads the in-memory cache via reloadCache(). The config file is
+written by a deploy-time script, only at service startup, not at runtime.
 ```
 
 **2. Auto-session log** — written by Lexis automatically when the MCP server
@@ -287,16 +284,16 @@ involvement, zero tokens consumed.
 
 ```markdown
 ## 2026-05-04 22:30 · auto-x9j2
-**Branch:** feature/X-Info-DDI-Prefix
+**Branch:** feature/multi-tenant-auth
 **Tags:** auto-session
 
 Duration: 47 min · 43 tool calls
 
-**Searched:** `kamailio.cfg`, `DdiAction`, `X-Info-DDI-Prefix`
-**Symbols inspected:** UserAgent, route[GET_DDI_PREFIX]
+**Searched:** `AuthService`, `tenantContext`, `RoleResolver`
+**Symbols inspected:** TenantManager, AuthService.login
 **Files read:**
-- asterisk/agi/src/Agi/Action/DdiAction.php
-- kamailio/users/config/kamailio.cfg
+- src/Auth/AuthService.php
+- src/Tenant/TenantContext.php
 ```
 
 ### When notes are loaded

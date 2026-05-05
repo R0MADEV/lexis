@@ -89,13 +89,13 @@ describe("branch-based categorization", () => {
   }
 
   test("note in fix/* branch goes to bugs/", () => {
-    initGitRepo(tmpDir, "fix/PROVIDER-2419");
-    addNote(tmpDir, "Found root cause in TrunksClient", ["bug"]);
+    initGitRepo(tmpDir, "fix/JIRA-1234");
+    addNote(tmpDir, "Found root cause in CacheService", ["bug"]);
     const slug = tmpDir.replace(/^\/+|\/+$/g, "").replace(/[\/\\]/g, "-").replace(/[^A-Za-z0-9._-]/g, "_");
     const bugsDir = path.join(os.homedir(), ".lexis", "projects", slug, "bugs");
     expect(fs.existsSync(bugsDir)).toBe(true);
     const filesIn = fs.readdirSync(bugsDir);
-    expect(filesIn.some((f: string) => f.includes("fix-PROVIDER-2419"))).toBe(true);
+    expect(filesIn.some((f: string) => f.includes("fix-JIRA-1234"))).toBe(true);
   });
 
   test("note in feature/* branch goes to features/", () => {
