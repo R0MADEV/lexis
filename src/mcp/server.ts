@@ -774,16 +774,21 @@ function execSearchCode(
 
         // If signature ends with ( or , it's multi-line — add ellipsis
         const displaySig = /[,(]\s*$/.test(sig) ? sig.slice(0, 108) + "…" : sig;
+
+        // Ultra mode: 1 line per result (sig only, no preview body, no blank between)
+        if (isUltraMode()) {
+          return `${relPath}:${r.symbol.lineStart} ${r.symbol.name} ${displaySig}`;
+        }
+
         const preview = body1 && body1 !== displaySig
           ? `  ${displaySig}\n  ${body1}`
           : `  ${displaySig}`;
-
         return `${relPath}:${r.symbol.lineStart}  [${r.symbol.type}] ${r.symbol.name}\n${preview}`;
       })
-      .join("\n\n");
+      .join(isUltraMode() ? "\n" : "\n\n");
 
     return overflow > 0
-      ? `${body}\n\n[${overflow} additional results omitted — use output='content' for full code]`
+      ? `${body}${isUltraMode() ? `\n[+${overflow}]` : `\n\n[${overflow} additional results omitted — use output='content' for full code]`}`
       : body;
   }
 
@@ -1223,13 +1228,60 @@ function readRangeKey(path: string, offset: number, limit: number): string {
   return `${path}:${offset}:${limit}`;
 }
 
+// Token-saving mode controlled by LEXIS_COMPRESSION env var.
+//   default | compact: regular output (current behavior)
+//   ultra:             aggressive — no decoratives, telegraphic, 1-line tool descs
+//
+// Trade-off: ultra mode ships less context to Claude (Claude may pick wrong
+// tools more often) but saves ~1500 tokens per session. Off by default; users
+// who max out their plan budget can opt in.
+export function isUltraMode(): boolean {
+  return process.env["LEXIS_COMPRESSION"] === "ultra";
+}
+
+// One-line ultra descriptions for the most common tools. Anything not listed
+// keeps its full description even in ultra mode (those tools are rare so the
+// savings come from the heavy hitters).
+const ULTRA_DESCRIPTIONS: Record<string, string> = {
+  search_code:    "Search code (compact|content|files, ctx bug|feature).",
+  get_symbol:     "Get fn/class def by name.",
+  read_file:      "Read file (path, offset, limit).",
+  find_references: "Find usages of symbol.",
+  find_file:      "Find files by pattern (glob).",
+  list_symbols:   "List symbols in file.",
+  list_entrypoints: "Routes/CLI/handlers/crons.",
+  call_chain:     "Trace callers up/down.",
+  get_context:    "fn+callers+tests for file:line.",
+  pattern_search: "Multi-pattern grep AND/OR.",
+  find_writes:    "Find code writing to a file.",
+  git_context:    "Branches+commits by keyword.",
+  recent_changes: "Files changed in N days.",
+  hot_files:      "Files with most commits.",
+  tests_for:      "Find tests for source file.",
+  config_lookup:  "Find config keys.",
+  explain:        "Summarize file or symbol.",
+  event_handlers: "Dispatchers+handlers of event.",
+  impact_analysis: "What breaks if symbol changes.",
+  interface_implementations: "Impls of interface.",
+  dead_code:      "Exports with no refs.",
+  note:           "Save finding for future sessions.",
+  notes:          "Recall notes (content/tag/file).",
+  forget:         "Delete note by id.",
+  reindex:        "Re-scan if results stale.",
+  investigate:    "Def+refs+tests in one call.",
+  list_todos:     "List TODO/FIXME/XXX/HACK.",
+  resolve_import: "Where does an import come from.",
+  lint:           "Run typechecker, parsed errors.",
+  outline:        "File signatures only.",
+};
+
 // Hide tools that don't apply to the current project from `tools/list`.
 // Saves Claude wasted tool calls AND ~300+ tokens of fixed cost on tools that
 // would never produce useful output for this project.
 //
 // Detection is cheap (just fs.existsSync on a few markers) and runs once per
 // `tools/list` request — typically once per session.
-export function filterToolsForProject<T extends { name: string }>(tools: T[], projectPath: string): T[] {
+export function filterToolsForProject<T extends { name: string; description?: string }>(tools: T[], projectPath: string): T[] {
   const hasLinter = detectLinter(projectPath) !== null;
   const hasGit = fs.existsSync(path.join(projectPath, ".git"));
   const hasTests = ["tests", "test", "spec", "__tests__", "cypress", "e2e"].some((d) =>
@@ -1239,13 +1291,21 @@ export function filterToolsForProject<T extends { name: string }>(tools: T[], pr
     fs.existsSync(path.join(projectPath, p))
   );
 
-  return tools.filter((t) => {
-    if (t.name === "lint" && !hasLinter) return false;
-    if ((t.name === "git_context" || t.name === "recent_changes" || t.name === "hot_files") && !hasGit) return false;
-    if (t.name === "tests_for" && !hasTests) return false;
-    if (t.name === "config_lookup" && !hasConfigs) return false;
-    return true;
-  });
+  const ultra = isUltraMode();
+
+  return tools
+    .filter((t) => {
+      if (t.name === "lint" && !hasLinter) return false;
+      if ((t.name === "git_context" || t.name === "recent_changes" || t.name === "hot_files") && !hasGit) return false;
+      if (t.name === "tests_for" && !hasTests) return false;
+      if (t.name === "config_lookup" && !hasConfigs) return false;
+      return true;
+    })
+    .map((t) => {
+      if (!ultra) return t;
+      const ultraDesc = ULTRA_DESCRIPTIONS[t.name];
+      return ultraDesc ? { ...t, description: ultraDesc } : t;
+    });
 }
 
 // Linter registry: marker file → command. Order matters (more-specific first).
@@ -1515,12 +1575,15 @@ function execInvestigate(
 
   // 1. DEFINITION
   const defResult = getSymbol(name, fileFilter, index);
+  const ultra = isUltraMode();
+  const sectionHeader = (label: string) => ultra ? `[${label}]` : `═══ ${label} ═══`;
+
   if (defResult) {
     const projectRoot = path.resolve(projectPath);
     const relPath = path.relative(projectRoot, defResult.symbol.file);
     const lineCount = defResult.body.split("\n").length;
     sections.push(
-      `═══ DEFINITION ═══\n${relPath}:${defResult.symbol.lineStart}-${defResult.symbol.lineStart + lineCount - 1} [${defResult.symbol.type}]\n\n\`\`\`\n${defResult.body}\n\`\`\``
+      `${sectionHeader("DEFINITION")}\n${relPath}:${defResult.symbol.lineStart}-${defResult.symbol.lineStart + lineCount - 1} [${defResult.symbol.type}]\n\n\`\`\`\n${defResult.body}\n\`\`\``
     );
   } else {
     return `Symbol "${name}" not found.`;
@@ -1543,7 +1606,7 @@ function execInvestigate(
       if (refLines.length >= 8) break;
     }
     if (refLines.length > 0) {
-      sections.push(`═══ REFERENCES (${refs.length} total, showing top ${refLines.length}) ═══\n${formatPathList(refLines)}`);
+      sections.push(`${sectionHeader(`REFERENCES (${refs.length} total, showing top ${refLines.length})`)}\n${formatPathList(refLines)}`);
     }
   }
 
@@ -1563,7 +1626,7 @@ function execInvestigate(
     const testFiles = [...new Set(testStdout.split("\n"))]
       .map((f) => path.relative(projectRoot, f))
       .slice(0, 5);
-    sections.push(`═══ TESTS ═══\n${testFiles.join("\n")}`);
+    sections.push(`${sectionHeader("TESTS")}\n${testFiles.join("\n")}`);
   }
 
   return sections.join("\n\n");
@@ -3241,8 +3304,10 @@ export function dispatchTool(
   projectPath: string
 ): string {
   // Include projectPath so multiple MCP instances or tests against different
-  // projects don't share results. (Not common in production but caught by tests.)
-  const cacheKey = CACHEABLE.has(name) ? `${projectPath}:${name}:${stableStringify(args)}` : null;
+  // projects don't share results. Also include compression mode — same args
+  // produce different output in ultra vs normal.
+  const compMode = process.env["LEXIS_COMPRESSION"] ?? "normal";
+  const cacheKey = CACHEABLE.has(name) ? `${projectPath}:${compMode}:${name}:${stableStringify(args)}` : null;
   if (cacheKey) {
     const cached = cacheGet(cacheKey);
     if (cached !== null) {

@@ -301,6 +301,62 @@ describe("dispatchTool — notes / forget", () => {
   });
 });
 
+describe("LEXIS_COMPRESSION mode — token-saving outputs", () => {
+  afterEach(() => {
+    delete process.env["LEXIS_COMPRESSION"];
+  });
+
+  test("search_code in 'ultra' mode returns shorter output than default", () => {
+    write("src/lib/AuthService.ts", `
+export class AuthService {
+  login(user: string) { return true; }
+  logout() { return false; }
+}
+`);
+    const idx = indexProject(tmpDir, null);
+
+    delete process.env["LEXIS_COMPRESSION"];
+    const normalOutput = dispatchTool(
+      "search_code",
+      { query: "AuthService", output: "compact" },
+      idx, tmpDir,
+    );
+
+    process.env["LEXIS_COMPRESSION"] = "ultra";
+    const ultraOutput = dispatchTool(
+      "search_code",
+      { query: "AuthService", output: "compact" },
+      idx, tmpDir,
+    );
+
+    expect(ultraOutput.length).toBeLessThan(normalOutput.length);
+    // Both should still mention the symbol
+    expect(ultraOutput).toContain("AuthService");
+  });
+
+  test("get_symbol in 'ultra' mode strips boxed headers and decorative chars", () => {
+    write("src/Foo.ts", "export class Foo {\n  bar() { return 1; }\n}");
+    const idx = indexProject(tmpDir, null);
+
+    process.env["LEXIS_COMPRESSION"] = "ultra";
+    const result = dispatchTool("get_symbol", { name: "Foo" }, idx, tmpDir);
+
+    // Decorative characters should be stripped
+    expect(result).not.toMatch(/═══|━━━|│/);
+    expect(result).toContain("Foo");
+  });
+
+  test("filterToolsForProject returns ultra-short descriptions in 'ultra' mode", () => {
+    process.env["LEXIS_COMPRESSION"] = "ultra";
+    const { filterToolsForProject } = require("../mcp/server");
+    const tools = [
+      { name: "search_code", description: "Search code. output: snippet|compact|content|files|count|trace|signatures|arch (default compact). depth 1-2 (default 1). top_k default 3. context: bug|feature (auto-tunes depth and ranking)." },
+    ];
+    const filtered = filterToolsForProject(tools, tmpDir);
+    expect(filtered[0]?.description.length).toBeLessThan(60);
+  });
+});
+
 describe("tool visibility — context-aware filtering", () => {
   test("git-related tools (git_context, recent_changes, hot_files) are HIDDEN when project is not a git repo", () => {
     write("src/a.ts", "x");
