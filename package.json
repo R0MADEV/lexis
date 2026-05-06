@@ -1,6 +1,6 @@
 {
   "name": "lexis-mcp",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Lexical + structural code search MCP server. ~80% fewer tokens per code task. Validated on Claude Code; should work with any MCP-compatible client (Cursor, Windsurf, Continue, Cline, Zed, etc. — untested, contributions welcome).",
   "main": "dist/cli/main.js",
   "bin": {

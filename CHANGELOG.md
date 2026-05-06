@@ -2,7 +2,7 @@
 
 Notable changes and architectural decisions in Lexis MCP. Most recent first.
 
-## Unreleased — modularization + test coverage
+## v0.12.0 — modularization + test coverage
 
 **Internal refactor of `src/mcp/server.ts` (3,550 → 2,504 lines, -29%).**
 
