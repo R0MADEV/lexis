@@ -8,93 +8,16 @@ import { loadIndex, saveIndex } from "../adapters/storage/index-file";
 import { addNote, removeNote, searchNotes, loadNotesForCurrentBranch, detectBranch, isMainBranch } from "../adapters/storage/notes-file";
 import { trackToolCall, saveSessionLog } from "./session-tracker";
 import { Index, Symbol as IndexedSymbol, indexProject } from "../core/indexer";
+import { cacheGet, cacheSet, clearToolCacheForTests } from "./runtime/cache";
+import { resolveRg, runRg } from "./runtime/ripgrep";
+import { JsonRpcRequest, JsonRpcResponse, send, ok, err, log } from "./runtime/jsonrpc";
 
-// All diagnostic output goes to stderr so it doesn't corrupt the stdio MCP protocol
-const log = (...args: unknown[]) => process.stderr.write(args.join(" ") + "\n");
-
-// ── In-memory LRU cache for tool results ─────────────────────────────────────
-// Saves repeated ripgrep / git invocations when Claude chains queries on the
-// same symbol. TTL bounds staleness when files change mid-session.
-const CACHE_MAX = 100;
-const CACHE_TTL_MS = 5 * 60 * 1000;
-const toolCache = new Map<string, { value: string; expires: number }>();
-
-// Test helper — wipe LRU between unit tests so state doesn't leak.
-export function clearToolCacheForTests(): void {
-  toolCache.clear();
-}
-
-export function cacheGet(key: string): string | null {
-  const hit = toolCache.get(key);
-  if (!hit) return null;
-  if (hit.expires < Date.now()) { toolCache.delete(key); return null; }
-  // refresh LRU position
-  toolCache.delete(key);
-  toolCache.set(key, hit);
-  return hit.value;
-}
-
-export function cacheSet(key: string, value: string): void {
-  if (toolCache.size >= CACHE_MAX) {
-    const oldest = toolCache.keys().next().value;
-    if (oldest !== undefined) toolCache.delete(oldest);
-  }
-  toolCache.set(key, { value, expires: Date.now() + CACHE_TTL_MS });
-}
-
-// ── Ripgrep resolution ────────────────────────────────────────────────────────
-// @vscode/ripgrep bundles the rg binary — always available after npm install.
-// Falls back to system rg if for some reason the bundled one is missing.
-let _rgPath: string | null | undefined = undefined;
-
-function resolveRg(): string | null {
-  if (_rgPath !== undefined) return _rgPath;
-  try {
-    const { rgPath } = require("@vscode/ripgrep") as { rgPath: string };
-    if (rgPath && fs.existsSync(rgPath)) { _rgPath = rgPath; return rgPath; }
-  } catch { /* not bundled */ }
-  const lookup = process.platform === "win32" ? "where" : "which";
-  const r = spawnSync(lookup, ["rg"], { encoding: "utf-8" });
-  const found = r.stdout?.split(/\r?\n/)[0]?.trim();
-  if (found && fs.existsSync(found)) { _rgPath = found; return found; }
-  _rgPath = null;
-  log("[warn] ripgrep not found — search tools will return empty results");
-  return null;
-}
-
-function runRg(args: string[]): { stdout: string; stderr: string } {
-  const rg = resolveRg();
-  if (!rg) return { stdout: "", stderr: "ripgrep not available" };
-  const r = spawnSync(rg, args, { encoding: "utf-8" });
-  return { stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
-}
+// Re-export test helpers for the existing test files.
+export { cacheGet, cacheSet, clearToolCacheForTests };
 
 // Tools whose results are deterministic given the same args+index — safe to cache.
 // Excluded: read_file (cheap, mtime-sensitive), list_symbols & find_file (already index-only).
 const CACHEABLE = new Set(["search_code", "get_symbol", "find_references", "get_context", "find_writes", "git_context", "recent_changes", "call_chain", "list_entrypoints", "explain", "event_handlers", "impact_analysis", "config_lookup", "interface_implementations", "pattern_search", "tests_for", "hot_files", "dead_code", "investigate", "list_todos", "resolve_import", "outline"]);
-
-interface JsonRpcRequest {
-  jsonrpc: "2.0";
-  id: number | string | null;
-  method: string;
-  params?: unknown;
-}
-
-type JsonRpcResponse =
-  | { jsonrpc: "2.0"; id: number | string | null; result: unknown }
-  | { jsonrpc: "2.0"; id: number | string | null; error: { code: number; message: string } };
-
-function send(msg: JsonRpcResponse): void {
-  process.stdout.write(JSON.stringify(msg) + "\n");
-}
-
-function ok(id: number | string | null, result: unknown): void {
-  send({ jsonrpc: "2.0", id, result });
-}
-
-function err(id: number | string | null, code: number, message: string): void {
-  send({ jsonrpc: "2.0", id, error: { code, message } });
-}
 
 // Build the MCP `instructions` field returned at `initialize`. If the user is
 // currently on a feature/bug branch with prior notes, the notes are appended
@@ -3425,7 +3348,7 @@ function refreshIfStale(current: Index, resolvedPath: string): Index {
 
   const reason = hasNewFile && !hasStaleFile ? "new file detected" : "file change detected";
   const updated = buildIndex(resolvedPath, current, `${reason} — auto re-index`);
-  toolCache.clear();
+  clearToolCacheForTests();
   return updated;
 }
 
@@ -3512,7 +3435,7 @@ export function startMcpServer(projectPath: string): void {
           let result: string;
           if (p.name === "reindex") {
             index = buildIndex(resolvedPath, index, "reindex requested");
-            toolCache.clear();
+            clearToolCacheForTests();
             result = `Re-indexed: ${index.files.length} files, ${index.symbols.length} symbols. Cache cleared.`;
           } else {
             result = dispatchTool(p.name, toolArgs, index, resolvedPath);
