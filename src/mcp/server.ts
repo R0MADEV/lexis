@@ -6,6 +6,7 @@ import { trackToolCall, saveSessionLog } from "./session-tracker";
 import { Index, indexProject } from "../core/indexer";
 import { cacheGet, cacheSet, clearToolCacheForTests } from "./runtime/cache";
 import { JsonRpcRequest, send, ok, err, log } from "./runtime/jsonrpc";
+import { recordToolCall } from "./runtime/telemetry";
 
 // Re-export test helpers for the existing test files.
 export { cacheGet, cacheSet, clearToolCacheForTests };
@@ -67,10 +68,12 @@ export function dispatchTool(
   // produce different output in ultra vs normal.
   const compMode = process.env["LEXIS_COMPRESSION"] ?? "normal";
   const cacheKey = CACHEABLE.has(name) ? `${projectPath}:${compMode}:${name}:${stableStringify(args)}` : null;
+  const tStart = Date.now();
   if (cacheKey) {
     const cached = cacheGet(cacheKey);
     if (cached !== null) {
       log(`[cache hit] ${name}`);
+      recordToolCall({ tool: name, args, result: cached, ms: Date.now() - tStart, cached: true, projectPath });
       return cached;
     }
   }
@@ -121,6 +124,7 @@ export function dispatchTool(
   }
 
   if (cacheKey) cacheSet(cacheKey, result);
+  recordToolCall({ tool: name, args, result, ms: Date.now() - tStart, cached: false, projectPath });
   return result;
 }
 
