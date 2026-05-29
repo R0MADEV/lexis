@@ -14,6 +14,7 @@ export const TOOLS = [
         top_k: { type: "number" },
         depth: { type: "number" },
         context: { type: "string", enum: ["bug", "feature", "general"] },
+        content_budget: { type: "number", description: "output=content only: max ~tokens of full code before extra results demote to compact previews (default 2500). Raise when you need many full bodies." },
       },
       required: ["query"],
     },

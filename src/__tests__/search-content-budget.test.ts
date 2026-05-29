@@ -93,4 +93,49 @@ describe("search_code content budget", () => {
     expect(result).toContain("CODE:");
     expect(result).toContain("WidgetSolo");
   });
+
+  test("demoted overflow results carry a code preview, not just a bare pointer", () => {
+    process.env["LEXIS_CONTENT_BUDGET"] = "120"; // force overflow after the first block
+    write("src/a.ts", bigClass("WidgetAlpha", 40));
+    write("src/b.ts", bigClass("WidgetBeta", 40));
+    const idx = indexProject(tmpDir, null);
+
+    const result = dispatchTool("search_code", { query: "Widget", output: "content", top_k: 10 }, idx, tmpDir);
+
+    // Everything after the "shown compact" marker is the demoted section. It must
+    // contain a code preview (a body line), not only "path:line name".
+    const marker = result.search(/shown compact/i);
+    expect(marker).toBeGreaterThan(-1);
+    const overflowSection = result.slice(marker);
+    expect(overflowSection).toMatch(/return|method|\{/); // some code leaked through as preview
+  });
+
+  test("content_budget arg overrides the env default", () => {
+    write("src/a.ts", bigClass("WidgetAlpha", 40));
+    write("src/b.ts", bigClass("WidgetBeta", 40));
+    write("src/c.ts", bigClass("WidgetGamma", 40));
+    const idx = indexProject(tmpDir, null);
+
+    // Env says tiny, but the arg asks for plenty → all full, no overflow marker.
+    process.env["LEXIS_CONTENT_BUDGET"] = "50";
+    const generousArg = dispatchTool(
+      "search_code",
+      { query: "Widget", output: "content", top_k: 10, content_budget: 100000 },
+      idx,
+      tmpDir,
+    );
+    expect(generousArg).not.toMatch(/shown compact/i);
+
+    clearToolCacheForTests();
+
+    // Env says huge, but the arg asks for tiny → overflow kicks in.
+    process.env["LEXIS_CONTENT_BUDGET"] = "100000";
+    const tightArg = dispatchTool(
+      "search_code",
+      { query: "Widget", output: "content", top_k: 10, content_budget: 80 },
+      idx,
+      tmpDir,
+    );
+    expect(tightArg).toMatch(/shown compact/i);
+  });
 });

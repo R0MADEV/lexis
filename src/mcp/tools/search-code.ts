@@ -217,12 +217,23 @@ export function execSearchCode(
   const projectRoot = path.resolve(projectPath);
 
   // Token budget: emit full bodies until the budget is spent, then demote the
-  // rest to compact one-liners. Stops a broad query from dumping 5k+ tokens of
-  // code at once. ~4 chars/token. Raise LEXIS_CONTENT_BUDGET to disable.
-  const budget = parseInt(process.env["LEXIS_CONTENT_BUDGET"] ?? "2500");
+  // rest to compact previews. Stops a broad query from dumping 5k+ tokens of
+  // code at once. ~4 chars/token. The per-call `content_budget` arg overrides
+  // the LEXIS_CONTENT_BUDGET env default — the caller raises it when it knows
+  // it needs depth, lowers it when just orienting.
+  const budget = typeof args["content_budget"] === "number"
+    ? (args["content_budget"] as number)
+    : parseInt(process.env["LEXIS_CONTENT_BUDGET"] ?? "2500");
   const fullBlocks: string[] = [];
   const compactLines: string[] = [];
   let used = 0;
+
+  // First meaningful body line of a result, so a demoted entry still shows
+  // enough for the caller to judge whether to fetch it full (vs a blind pointer).
+  const previewOf = (code: string): string => {
+    const line = code.split("\n").map((l) => l.trim()).find((l) => l.length > 2 && !l.startsWith("//"));
+    return line ? `\n  ${line.slice(0, 100)}` : "";
+  };
 
   for (const r of limited) {
     const block = `FILE: ${r.symbol.file} (lines ${r.symbol.lineStart}-${r.symbol.lineEnd})\nSYMBOL: ${r.symbol.name}\nCODE:\n\`\`\`\n${r.code}\n\`\`\``;
@@ -234,7 +245,7 @@ export function execSearchCode(
       used += blockTokens;
     } else {
       const rel = path.relative(projectRoot, r.symbol.file);
-      compactLines.push(`${rel}:${r.symbol.lineStart}  [${r.symbol.type}] ${r.symbol.name}`);
+      compactLines.push(`${rel}:${r.symbol.lineStart}  [${r.symbol.type}] ${r.symbol.name}${previewOf(r.code)}`);
     }
   }
 

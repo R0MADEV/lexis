@@ -19,7 +19,8 @@ CRITICAL — note() to persist findings (the MCP can't see the chat):
 - GOOD: "Bug X from Y. The W clue is misleading — actually unrelated." with tags+files.
 - BAD: "started investigating", "found ClassX" (already in index), process commentary.
 
-OUTPUT MODES (tokens/result): snippet ~15, compact ~50, content ~500, files/count tiny.`;
+OUTPUT MODES (tokens/result): snippet ~15, compact ~50, content ~500, files/count tiny.
+content caps at ~2500 tok (overflow → compact previews you can judge before refetching); pass content_budget to raise it when you need many full bodies.`;
 
 export function buildSessionInstructions(projectPath: string): string {
   const branch = detectBranch(projectPath);

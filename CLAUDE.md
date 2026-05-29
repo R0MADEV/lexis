@@ -8,6 +8,8 @@ Servidor MCP `lexis-lexis` indexa este proyecto. Úsalo como fuente primaria —
 
 ## Reglas
 - `output='content'` solo si necesitas 2+ implementaciones completas (~500 tok/resultado).
+  - Capa a ~2500 tok totales; el resto baja a preview compact (firma + 1 línea) que puedes juzgar antes de re-pedir con `get_symbol`.
+  - Sube `content_budget` (arg de la llamada) cuando sepas que necesitas muchos cuerpos completos; el operador fija la política base con la env var `LEXIS_CONTENT_BUDGET`.
 - `depth=2` solo para conceptos amplios (default=1).
 - Usa siempre `offset` en `read_file` cuando sabes la línea exacta.
 
