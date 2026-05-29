@@ -214,15 +214,36 @@ export function execSearchCode(
   const limit = parseInt(process.env["LEXIS_TOOL_RESULT_LIMIT"] ?? "20");
   const limited = results.slice(0, limit);
   const overflow = results.length - limited.length;
+  const projectRoot = path.resolve(projectPath);
 
-  const body = limited
-    .map(
-      (r) =>
-        `FILE: ${r.symbol.file} (lines ${r.symbol.lineStart}-${r.symbol.lineEnd})\nSYMBOL: ${r.symbol.name}\nCODE:\n\`\`\`\n${r.code}\n\`\`\``
-    )
-    .join("\n\n---\n\n");
+  // Token budget: emit full bodies until the budget is spent, then demote the
+  // rest to compact one-liners. Stops a broad query from dumping 5k+ tokens of
+  // code at once. ~4 chars/token. Raise LEXIS_CONTENT_BUDGET to disable.
+  const budget = parseInt(process.env["LEXIS_CONTENT_BUDGET"] ?? "2500");
+  const fullBlocks: string[] = [];
+  const compactLines: string[] = [];
+  let used = 0;
 
-  return overflow > 0
-    ? `${body}\n\n[${overflow} additional results omitted — refine query or use output='files'/'count']`
-    : body;
+  for (const r of limited) {
+    const block = `FILE: ${r.symbol.file} (lines ${r.symbol.lineStart}-${r.symbol.lineEnd})\nSYMBOL: ${r.symbol.name}\nCODE:\n\`\`\`\n${r.code}\n\`\`\``;
+    const blockTokens = Math.ceil(block.length / 4);
+    // Always emit at least the first result full, even if it alone exceeds the
+    // budget — content mode must never come back empty.
+    if (fullBlocks.length === 0 || used + blockTokens <= budget) {
+      fullBlocks.push(block);
+      used += blockTokens;
+    } else {
+      const rel = path.relative(projectRoot, r.symbol.file);
+      compactLines.push(`${rel}:${r.symbol.lineStart}  [${r.symbol.type}] ${r.symbol.name}`);
+    }
+  }
+
+  let body = fullBlocks.join("\n\n---\n\n");
+  if (compactLines.length > 0) {
+    body += `\n\n[${compactLines.length} more shown compact — content budget reached, narrow the query for full code]\n${compactLines.join("\n")}`;
+  }
+  if (overflow > 0) {
+    body += `\n\n[${overflow} additional results omitted — refine query or use output='files'/'count']`;
+  }
+  return body;
 }
