@@ -6,8 +6,10 @@
 //   • event_handlers             — dispatchers + listeners for an event
 //   • impact_analysis            — blast-radius summary for a symbol
 
+import * as fs from "fs";
 import * as path from "path";
 import { getSymbol, findReferences, suggestSimilar } from "../../core/searcher";
+import { attributeReferences } from "../../core/import-resolver";
 import { Index, Symbol as IndexedSymbol } from "../../core/indexer";
 import { log } from "../runtime/jsonrpc";
 import { runRg } from "../runtime/ripgrep";
@@ -433,18 +435,50 @@ export function execImpactAnalysis(
 ): string {
   const symbolName = args["symbol"] as string;
   if (!symbolName) return "Error: 'symbol' is required.";
+  const definedIn = args["defined_in"] as string | undefined;
 
-  log(`[impact_analysis] symbol="${symbolName}"`);
+  log(`[impact_analysis] symbol="${symbolName}" defined_in=${definedIn ?? "none"}`);
 
-  const symInfo = getSymbol(symbolName, undefined, index);
+  const symInfo = getSymbol(symbolName, definedIn, index);
   if (!symInfo) {
     const sug = suggestSimilar(symbolName, index, 5);
     return `Symbol "${symbolName}" not found.${formatSuggestions(sug, path.resolve(projectPath))}`;
   }
 
   // Direct refs (depth=1)
-  const refs = findReferences(symbolName, projectPath, index);
+  const allRefs = findReferences(symbolName, projectPath, index);
   const projectRoot = path.resolve(projectPath);
+
+  // Several definitions share this name, so the raw reference list mixes them.
+  // With defined_in, keep only what binds to the chosen one; without it, say so
+  // rather than presenting a blast radius that silently sums unrelated symbols.
+  const definitions = [...new Set(index.symbols.filter((s) => s.name === symbolName).map((s) => s.file))];
+  let ambiguityNote: string | null = null;
+  let refs = allRefs;
+
+  if (definitions.length > 1) {
+    const contents = new Map<string, string>();
+    const readFile = (f: string): string => {
+      if (!contents.has(f)) {
+        try { contents.set(f, fs.readFileSync(f, "utf-8")); }
+        catch { contents.set(f, ""); }
+      }
+      return contents.get(f)!;
+    };
+    const { byDefinition, unattributed } = attributeReferences(allRefs, symbolName, definitions, readFile);
+
+    if (definedIn) {
+      refs = byDefinition.get(symInfo.symbol.file) ?? [];
+      if (unattributed.length > 0) {
+        ambiguityNote = `NOTE: ${unattributed.length} reference(s) could not be bound to any definition and are excluded from these numbers.`;
+      }
+    } else {
+      const list = definitions.map((d) => `  ${path.relative(projectRoot, d)}`).join("\n");
+      ambiguityNote =
+        `⚠️  AMBIGUOUS: ${definitions.length} definitions share the name "${symbolName}", ` +
+        `so the numbers below merge all of them. Pass defined_in to scope to one:\n${list}`;
+    }
+  }
 
   const calls = refs.filter((r) => r.kind === "call");
   const types = refs.filter((r) => r.kind === "type" || r.kind === "other");
@@ -475,6 +509,7 @@ export function execImpactAnalysis(
     riskScore < 50 ? "HIGH"   : "CRITICAL";
 
   const sections: string[] = [];
+  if (ambiguityNote) sections.push(ambiguityNote);
   sections.push(
     `IMPACT ANALYSIS: ${symbolName} [${symInfo.symbol.type}]`,
     `  ${path.relative(projectRoot, symInfo.symbol.file)}:${symInfo.symbol.lineStart}`,

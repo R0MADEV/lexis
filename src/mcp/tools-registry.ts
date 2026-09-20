@@ -68,12 +68,13 @@ export const TOOLS = [
   },
   {
     name: "find_references",
-    description: "Find all usages of a symbol: calls, imports, type refs, definition. depth=2 traces callers-of-callers for full propagation chain (essential for deep bug analysis).",
+    description: "Find all usages of a symbol: calls, imports, type refs, definition. When several definitions share the name, results are grouped per definition — each referencing file is bound through its own import — plus an UNATTRIBUTED section for what no import binds (method calls, same-package symbols, dynamic dispatch). depth=2 traces callers-of-callers for full propagation chain (essential for deep bug analysis).",
     inputSchema: {
       type: "object",
       properties: {
         symbol: { type: "string", description: "Exact symbol name to find references for" },
         depth: { type: "number", description: "1=direct callers only (default), 2=callers of callers" },
+        defined_in: { type: "string", description: "Path substring selecting WHICH definition to report on, when several share the name. Not a filter on where references live." },
       },
       required: ["symbol"],
     },
@@ -171,11 +172,12 @@ export const TOOLS = [
   },
   {
     name: "impact_analysis",
-    description: "Reverse impact: what breaks if you change SYMBOL? Lists direct callers + transitive callers (depth 2) + tests covering them + cross-layer references. Use BEFORE refactoring to estimate blast radius.",
+    description: "Reverse impact: what breaks if you change SYMBOL? Lists direct callers + transitive callers (depth 2) + tests covering them + cross-layer references. Use BEFORE refactoring to estimate blast radius. When several definitions share the name the result says so; defined_in scopes the radius to one.",
     inputSchema: {
       type: "object",
       properties: {
         symbol: { type: "string", description: "Symbol name to analyze" },
+        defined_in: { type: "string", description: "Path substring selecting WHICH definition to analyze, when several share the name." },
       },
       required: ["symbol"],
     },

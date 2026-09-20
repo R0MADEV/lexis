@@ -3,6 +3,7 @@ import {
   findImportSpecifier,
   resolveImportToCandidate,
   attributeReference,
+  attributeReferences,
 } from "../core/import-resolver";
 
 const ROOT = "/proj";
@@ -123,5 +124,48 @@ describe("attributeReference", () => {
     const candidates = [p("src/app/Home.tsx")];
     expect(attributeReference(from, `handleClick();`, "handleClick", candidates))
       .toEqual({ file: p("src/app/Home.tsx"), via: "only-definition" });
+  });
+});
+
+describe("attributeReferences", () => {
+  const defs = [p("src/admin/Home.ts"), p("src/app/Home.ts")];
+  const contents: Record<string, string> = {
+    [p("src/admin/Panel.ts")]: `import { handleClick } from './Home';`,
+    [p("src/app/Board.ts")]: `import { handleClick } from './Home';`,
+    [p("src/legacy/old.ts")]: `widget.handleClick();`,
+  };
+  const read = (f: string) => contents[f] ?? "";
+
+  test("splits references by the definition each file binds to", () => {
+    const refs = [
+      { file: p("src/admin/Panel.ts"), line: 1 },
+      { file: p("src/app/Board.ts"), line: 1 },
+    ];
+    const out = attributeReferences(refs, "handleClick", defs, read);
+    expect(out.byDefinition.get(p("src/admin/Home.ts"))).toEqual([refs[0]]);
+    expect(out.byDefinition.get(p("src/app/Home.ts"))).toEqual([refs[1]]);
+    expect(out.unattributed).toEqual([]);
+  });
+
+  test("keeps what it cannot bind in a separate bucket instead of guessing", () => {
+    const refs = [{ file: p("src/legacy/old.ts"), line: 1 }];
+    const out = attributeReferences(refs, "handleClick", defs, read);
+    expect(out.unattributed).toEqual(refs);
+    expect(out.byDefinition.size).toBe(0);
+  });
+
+  test("a reference living in a definition file belongs to that definition", () => {
+    const refs = [{ file: p("src/app/Home.ts"), line: 1 }];
+    const out = attributeReferences(refs, "handleClick", defs, read);
+    expect(out.byDefinition.get(p("src/app/Home.ts"))).toEqual(refs);
+  });
+
+  test("never reads a file when there is nothing to disambiguate", () => {
+    let reads = 0;
+    const counting = (f: string) => { reads++; return read(f); };
+    const refs = [{ file: p("src/app/Board.ts"), line: 1 }];
+    const out = attributeReferences(refs, "handleClick", [p("src/app/Home.ts")], counting);
+    expect(reads).toBe(0);
+    expect(out.byDefinition.get(p("src/app/Home.ts"))).toEqual(refs);
   });
 });

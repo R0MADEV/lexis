@@ -119,3 +119,47 @@ export function attributeReference(
   const resolved = resolveImportToCandidate(file, specifier, candidates);
   return resolved ? { file: resolved, via: "import" } : null;
 }
+
+export interface AttributedReferences<T> {
+  byDefinition: Map<string, T[]>;
+  unattributed: T[];
+}
+
+// Splits references by the definition each one binds to. Files are read through
+// the injected `readFile` so callers can pass a cache they already fill, and
+// each referencing file is attributed once however many references it holds.
+// With a single definition there is nothing to decide and no file is read.
+export function attributeReferences<T extends { file: string }>(
+  refs: T[],
+  symbol: string,
+  definitions: string[],
+  readFile: (file: string) => string,
+): AttributedReferences<T> {
+  const byDefinition = new Map<string, T[]>();
+  const unattributed: T[] = [];
+
+  const push = (definition: string, ref: T): void => {
+    const existing = byDefinition.get(definition);
+    if (existing) existing.push(ref);
+    else byDefinition.set(definition, [ref]);
+  };
+
+  const isUnambiguous = definitions.length === 1;
+  const perFile = new Map<string, string | null>();
+
+  for (const ref of refs) {
+    if (isUnambiguous) {
+      push(definitions[0]!, ref);
+      continue;
+    }
+    if (!perFile.has(ref.file)) {
+      const attribution = attributeReference(ref.file, readFile(ref.file), symbol, definitions);
+      perFile.set(ref.file, attribution?.file ?? null);
+    }
+    const definition = perFile.get(ref.file) ?? null;
+    if (definition) push(definition, ref);
+    else unattributed.push(ref);
+  }
+
+  return { byDefinition, unattributed };
+}

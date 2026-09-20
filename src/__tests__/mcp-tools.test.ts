@@ -532,6 +532,79 @@ describe("dispatchTool — resolve_import (multi-language)", () => {
   });
 });
 
+describe("dispatchTool — same-name symbol attribution", () => {
+  function writeAmbiguousProject() {
+    write("src/admin/Home.ts", "export function handleClick() { return 'admin'; }");
+    write("src/app/Home.ts", "export function handleClick() { return 'app'; }");
+    write("src/admin/Panel.ts", "import { handleClick } from './Home';\nexport function panel() { return handleClick(); }");
+    write("src/app/Board.ts", "import { handleClick } from './Home';\nexport function board() { return handleClick(); }");
+    write("src/legacy/old.ts", "export function old(w: any) { return w.handleClick(); }");
+  }
+
+  test("find_references groups references under the definition each one binds to", () => {
+    writeAmbiguousProject();
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("find_references", { symbol: "handleClick" }, idx, tmpDir);
+
+    const adminBlock = result.slice(result.indexOf("DEFINITION: src/admin/Home.ts"));
+    expect(adminBlock).toContain("admin/Panel.ts");
+    const appIdx = result.indexOf("DEFINITION: src/app/Home.ts");
+    expect(appIdx).toBeGreaterThan(-1);
+    expect(result.slice(appIdx)).toContain("app/Board.ts");
+  });
+
+  test("find_references reports what it could not bind instead of merging it in", () => {
+    writeAmbiguousProject();
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("find_references", { symbol: "handleClick" }, idx, tmpDir);
+    const tail = result.slice(result.indexOf("UNATTRIBUTED"));
+    expect(tail).toContain("legacy/old.ts");
+  });
+
+  test("find_references with defined_in returns only that definition's references", () => {
+    writeAmbiguousProject();
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("find_references", { symbol: "handleClick", defined_in: "src/admin" }, idx, tmpDir);
+    expect(result).toContain("admin/Panel.ts");
+    expect(result).not.toContain("app/Board.ts");
+  });
+
+  test("find_references says which definitions exist when defined_in matches none", () => {
+    writeAmbiguousProject();
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("find_references", { symbol: "handleClick", defined_in: "nowhere" }, idx, tmpDir);
+    expect(result).toContain("admin/Home.ts");
+    expect(result).toContain("app/Home.ts");
+  });
+
+  test("a symbol with one definition keeps the flat output", () => {
+    write("src/lib/onlyOne.ts", "export function onlyOne() { return 1; }");
+    write("src/app/uses.ts", "import { onlyOne } from '../lib/onlyOne';\nonlyOne();");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("find_references", { symbol: "onlyOne" }, idx, tmpDir);
+    expect(result).not.toContain("DEFINITION:");
+    expect(result).not.toContain("UNATTRIBUTED");
+    expect(result).toContain("uses.ts");
+  });
+
+  test("impact_analysis flags that its numbers merge several definitions", () => {
+    writeAmbiguousProject();
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("impact_analysis", { symbol: "handleClick" }, idx, tmpDir);
+    expect(result).toContain("AMBIGUOUS");
+    expect(result).toContain("defined_in");
+  });
+
+  test("impact_analysis with defined_in scopes the blast radius to one definition", () => {
+    writeAmbiguousProject();
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("impact_analysis", { symbol: "handleClick", defined_in: "src/admin" }, idx, tmpDir);
+    expect(result).not.toContain("AMBIGUOUS");
+    expect(result).toContain("admin/Home.ts");
+    expect(result).not.toContain("app/Board.ts");
+  });
+});
+
 describe("dispatchTool — read_file shows enclosing signature", () => {
   test("includes enclosing class+method signatures, not just names", () => {
     const lines = [

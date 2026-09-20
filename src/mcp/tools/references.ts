@@ -5,6 +5,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { findReferences, getContext, suggestSimilar } from "../../core/searcher";
+import { attributeReferences } from "../../core/import-resolver";
 import { Index } from "../../core/indexer";
 import { log } from "../runtime/jsonrpc";
 import { runRg } from "../runtime/ripgrep";
@@ -17,8 +18,28 @@ export function execFindReferences(
 ): string {
   const symbol = args["symbol"] as string;
   const depth = typeof args["depth"] === "number" ? Math.min(Math.max(1, args["depth"]), 2) : 1;
+  const definedIn = args["defined_in"] as string | undefined;
 
-  log(`[find_references] symbol="${symbol}" depth=${depth}`);
+  log(`[find_references] symbol="${symbol}" depth=${depth} defined_in=${definedIn ?? "none"}`);
+
+  const root = path.resolve(projectPath);
+  const definitions = [...new Set(index.symbols.filter((s) => s.name === symbol).map((s) => s.file))];
+  const listDefinitions = (): string =>
+    definitions.map((d) => `  ${path.relative(root, d)}`).join("\n");
+
+  let target: string | null = null;
+  if (definedIn) {
+    const needle = definedIn.toLowerCase();
+    const matches = definitions.filter((d) => d.toLowerCase().includes(needle));
+    if (matches.length === 0) {
+      return `No definition of "${symbol}" lives in a path matching "${definedIn}". Known definitions:\n${listDefinitions()}`;
+    }
+    if (matches.length > 1) {
+      const list = matches.map((m) => `  ${path.relative(root, m)}`).join("\n");
+      return `"${definedIn}" matches ${matches.length} definitions of "${symbol}" — narrow it:\n${list}`;
+    }
+    target = matches[0]!;
+  }
 
   const refs = findReferences(symbol, projectPath, index);
   if (refs.length === 0) {
@@ -53,14 +74,56 @@ export function execFindReferences(
 
   // definitions first, then calls, types, other, imports last
   const KIND_ORDER: Record<string, number> = { definition: 0, call: 1, type: 2, other: 3, import: 4 };
-  const sorted = [...refs].sort((a, b) => (KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9));
+  const byKind = <T extends { kind: string }>(list: T[]): T[] =>
+    [...list].sort((a, b) => (KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9));
   const MAX = 25;
-  const shown = sorted.slice(0, MAX);
-  const overflow = refs.length - shown.length;
+  const render = (list: typeof refs): string => byKind(list).map((r) => formatRef(r)).join("\n\n");
 
-  const parts = shown.map((r) => formatRef(r));
-  let body = `${refs.length} references to "${symbol}":\n\n${parts.join("\n\n")}`;
-  if (overflow > 0) body += `\n\n[${overflow} more references omitted]`;
+  const UNBOUND_NOTE =
+    "name matches no import binds to a definition — a method call, a same-package symbol, or dynamic dispatch";
+
+  let body: string;
+
+  // One definition: nothing to disambiguate, keep the flat output.
+  if (definitions.length <= 1) {
+    const shown = byKind(refs).slice(0, MAX);
+    const overflow = refs.length - shown.length;
+    body = `${refs.length} references to "${symbol}":\n\n${shown.map((r) => formatRef(r)).join("\n\n")}`;
+    if (overflow > 0) body += `\n\n[${overflow} more references omitted]`;
+  } else {
+    const { byDefinition, unattributed } = attributeReferences(
+      refs, symbol, definitions, (f) => getLines(f).join("\n")
+    );
+
+    if (target) {
+      const mine = (byDefinition.get(target) ?? []).slice(0, MAX);
+      const total = byDefinition.get(target)?.length ?? 0;
+      const overflow = total - mine.length;
+      body = `${total} references to "${symbol}" defined in ${path.relative(root, target)}:\n\n${mine.map((r) => formatRef(r)).join("\n\n")}`;
+      if (overflow > 0) body += `\n\n[${overflow} more references omitted]`;
+      if (unattributed.length > 0) {
+        body += `\n\n[${unattributed.length} further reference(s) could not be bound to any definition — ${UNBOUND_NOTE}. Omit defined_in to see them.]`;
+      }
+    } else {
+      const sections = [...byDefinition.entries()]
+        .sort((a, b) => b[1].length - a[1].length)
+        .map(([definition, list]) => {
+          const shown = list.slice(0, MAX);
+          const omitted = list.length - shown.length;
+          const tail = omitted > 0 ? `\n\n[${omitted} more omitted]` : "";
+          return `DEFINITION: ${path.relative(root, definition)}  (${list.length} ref${list.length === 1 ? "" : "s"})\n\n${render(shown)}${tail}`;
+        });
+
+      if (unattributed.length > 0) {
+        const shown = unattributed.slice(0, MAX);
+        const omitted = unattributed.length - shown.length;
+        const tail = omitted > 0 ? `\n\n[${omitted} more omitted]` : "";
+        sections.push(`UNATTRIBUTED (${unattributed.length}) — ${UNBOUND_NOTE}:\n\n${render(shown)}${tail}`);
+      }
+
+      body = `${refs.length} references to "${symbol}", across ${definitions.length} definitions of that name. Pass defined_in to scope to one:\n\n${sections.join("\n\n")}`;
+    }
+  }
 
   // depth=2: trace callers of each direct caller using the index
   if (depth >= 2) {
