@@ -14,7 +14,7 @@ export function execListSymbols(
   args: Record<string, unknown>,
   index: Index
 ): string {
-  const fileFilter = (args["file_filter"] as string | undefined)?.toLowerCase();
+  const fileFilter = (args["path_filter"] as string | undefined)?.toLowerCase();
   const nameFilter = (args["name_filter"] as string | undefined)?.toLowerCase();
 
   let symbols = index.symbols;
@@ -111,7 +111,7 @@ export function execGetSymbol(
   projectPath: string
 ): string {
   const name = args["name"] as string;
-  const fileFilter = args["file_filter"] as string | undefined;
+  const fileFilter = args["path_filter"] as string | undefined;
 
   log(`[get_symbol] name="${name}" file_filter=${fileFilter ?? "none"}`);
 

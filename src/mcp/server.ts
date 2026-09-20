@@ -23,6 +23,7 @@ import { TOOLS } from "./tools-registry";
 // Re-exported for existing tests.
 import { findEnclosingSignatures, truncateIfExcessive, rankFiles, identTokens, globToRegex } from "./runtime/search-utils";
 import { baseFileName, compressPaths, formatPathList } from "./runtime/path-utils";
+import { normalizeArgs } from "./runtime/arg-aliases";
 export { findEnclosingSignatures, truncateIfExcessive, rankFiles, identTokens, globToRegex };
 export { baseFileName, compressPaths, formatPathList };
 
@@ -59,10 +60,14 @@ export { resetSessionState, readRangeKey };
 
 export function dispatchTool(
   name: string,
-  args: Record<string, unknown>,
+  rawArgs: Record<string, unknown>,
   index: Index,
   projectPath: string
 ): string {
+  // Rewrite legacy parameter names before anything else, so the handlers below
+  // only ever see canonical ones and an alias shares the caller's cache entry.
+  const args = normalizeArgs(name, rawArgs);
+
   // Include projectPath so multiple MCP instances or tests against different
   // projects don't share results. Also include compression mode — same args
   // produce different output in ultra vs normal.

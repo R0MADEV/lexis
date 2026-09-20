@@ -14,6 +14,7 @@ export const TOOLS = [
         top_k: { type: "number" },
         depth: { type: "number" },
         context: { type: "string", enum: ["bug", "feature", "general"] },
+        path_filter: { type: "string", description: "Optional: limit to files whose path contains this substring (e.g. 'src/auth')" },
         content_budget: { type: "number", description: "output=content only: max ~tokens of full code before extra results demote to compact previews (default 2500). Raise when you need many full bodies." },
       },
       required: ["query"],
@@ -25,7 +26,7 @@ export const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string" },
+        path: { type: "string", description: "File path (relative or absolute)" },
         offset: { type: "number" },
         limit: { type: "number" },
       },
@@ -34,11 +35,11 @@ export const TOOLS = [
   },
   {
     name: "list_symbols",
-    description: "List indexed functions/classes. Filter by file_filter or name_filter substrings.",
+    description: "List indexed functions/classes. Filter by path_filter or name_filter substrings.",
     inputSchema: {
       type: "object",
       properties: {
-        file_filter: { type: "string" },
+        path_filter: { type: "string", description: "Optional: limit to files whose path contains this substring" },
         name_filter: { type: "string" },
       },
     },
@@ -61,7 +62,7 @@ export const TOOLS = [
       type: "object",
       properties: {
         name: { type: "string", description: "Symbol name (exact or partial)" },
-        file_filter: { type: "string", description: "Optional: filter by file path substring" },
+        path_filter: { type: "string", description: "Optional: limit to files whose path contains this substring" },
       },
       required: ["name"],
     },
@@ -85,10 +86,10 @@ export const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        file: { type: "string", description: "File path (relative or absolute)" },
+        path: { type: "string", description: "File path (relative or absolute)" },
         line: { type: "number", description: "Line number from the stack trace or error" },
       },
-      required: ["file", "line"],
+      required: ["path", "line"],
     },
   },
   {
@@ -212,6 +213,7 @@ export const TOOLS = [
       properties: {
         pattern: { type: "string", description: "PCRE regex (use \\\\ for backslashes in JSON). E.g. 'console\\\\.log' or '@deprecated'" },
         glob:    { type: "string", description: "Optional glob filter (e.g. '*.ts', 'src/**')" },
+        path_filter: { type: "string", description: "Optional: limit to a directory (used as ripgrep's search root, so it walks less) or a path substring" },
         max:     { type: "number", description: "Max files to return (default 20)" },
       },
       required: ["pattern"],
@@ -245,7 +247,7 @@ export const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        scope:  { type: "string", description: "Optional path filter (e.g. 'src/legacy/')" },
+        path_filter: { type: "string", description: "Optional: limit to files whose path contains this substring (e.g. 'src/legacy/')" },
         limit:  { type: "number", description: "Max symbols to return (default 30)" },
       },
     },
@@ -306,10 +308,10 @@ export const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        file: { type: "string", description: "The file that imports the symbol (relative or absolute path)" },
+        path: { type: "string", description: "The file that imports the symbol (relative or absolute)" },
         symbol: { type: "string", description: "The imported symbol/identifier name" },
       },
-      required: ["file", "symbol"],
+      required: ["path", "symbol"],
     },
   },
   {
@@ -318,9 +320,9 @@ export const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        file: { type: "string", description: "File path (relative or absolute)" },
+        path: { type: "string", description: "File path (relative or absolute)" },
       },
-      required: ["file"],
+      required: ["path"],
     },
   },
   {
@@ -341,7 +343,7 @@ export const TOOLS = [
       type: "object",
       properties: {
         name: { type: "string", description: "Symbol name (exact or partial)" },
-        file_filter: { type: "string", description: "Optional: filter by file path substring" },
+        path_filter: { type: "string", description: "Optional: limit to files whose path contains this substring" },
       },
       required: ["name"],
     },

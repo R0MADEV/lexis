@@ -633,6 +633,92 @@ describe("dispatchTool — same-name symbol attribution", () => {
   });
 });
 
+describe("dispatchTool — path scoping", () => {
+  test("search_code narrows to a path with path_filter", () => {
+    write("src/auth/login.ts", "export function handleClick() { return 1; }");
+    write("tests/auth/login.test.ts", "export function handleClick() { return 2; }");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "search_code",
+      { query: "handleClick", output: "files", top_k: 10, path_filter: "src/" },
+      idx, tmpDir,
+    );
+    expect(result).toContain("src/auth/login.ts");
+    expect(result).not.toContain("tests/auth");
+  });
+
+  test("search_code without path_filter still sees the whole project", () => {
+    write("src/auth/login.ts", "export function handleClick() { return 1; }");
+    write("tests/auth/login.test.ts", "export function handleClick() { return 2; }");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "search_code",
+      { query: "handleClick", output: "files", top_k: 10 },
+      idx, tmpDir,
+    );
+    expect(result).toContain("tests/auth");
+  });
+
+  test("search_code says so when path_filter excludes everything", () => {
+    write("src/auth/login.ts", "export function handleClick() { return 1; }");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "search_code",
+      { query: "handleClick", output: "files", path_filter: "does/not/exist" },
+      idx, tmpDir,
+    );
+    expect(result).toContain("does/not/exist");
+  });
+
+  test("pattern_search narrows to a directory with path_filter", () => {
+    write("src/a.ts", "// TODO: real work");
+    write("docs/b.ts", "// TODO: documentation");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("pattern_search", { pattern: "TODO", path_filter: "src" }, idx, tmpDir);
+    expect(result).toContain("src/a.ts");
+    expect(result).not.toContain("docs/b.ts");
+  });
+
+  test("pattern_search accepts a path_filter that is a substring, not a directory", () => {
+    write("src/auth/a.ts", "// TODO: one");
+    write("src/billing/b.ts", "// TODO: two");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("pattern_search", { pattern: "TODO", path_filter: "auth" }, idx, tmpDir);
+    expect(result).toContain("auth/a.ts");
+    expect(result).not.toContain("billing");
+  });
+});
+
+describe("dispatchTool — parameter aliases", () => {
+  test("outline accepts both path and the older file", () => {
+    write("src/a.ts", "export function alpha() { return 1; }");
+    const idx = indexProject(tmpDir, null);
+    const viaPath = dispatchTool("outline", { path: "src/a.ts" }, idx, tmpDir);
+    const viaFile = dispatchTool("outline", { file: "src/a.ts" }, idx, tmpDir);
+    expect(viaPath).toContain("alpha");
+    expect(viaFile).toBe(viaPath);
+  });
+
+  test("get_symbol accepts both path_filter and the older file_filter", () => {
+    write("src/admin/Widget.ts", "export class Widget { admin() {} }");
+    write("src/app/Widget.ts", "export class Widget { app() {} }");
+    const idx = indexProject(tmpDir, null);
+    const viaNew = dispatchTool("get_symbol", { name: "Widget", path_filter: "src/admin" }, idx, tmpDir);
+    const viaOld = dispatchTool("get_symbol", { name: "Widget", file_filter: "src/admin" }, idx, tmpDir);
+    expect(viaNew).toContain("admin");
+    expect(viaOld).toBe(viaNew);
+  });
+
+  test("dead_code accepts both path_filter and the older scope", () => {
+    write("src/legacy/unused.ts", "export function neverCalled() { return 1; }");
+    write("src/app/used.ts", "export function alsoUnused() { return 2; }");
+    const idx = indexProject(tmpDir, null);
+    const viaNew = dispatchTool("dead_code", { path_filter: "src/legacy" }, idx, tmpDir);
+    const viaOld = dispatchTool("dead_code", { scope: "src/legacy" }, idx, tmpDir);
+    expect(viaOld).toBe(viaNew);
+  });
+});
+
 describe("dispatchTool — read_file shows enclosing signature", () => {
   test("includes enclosing class+method signatures, not just names", () => {
     const lines = [

@@ -77,9 +77,9 @@ export function execResolveImport(
   index: Index,
   projectPath: string,
 ): string {
-  const file = args["file"] as string;
+  const file = args["path"] as string;
   const symbol = args["symbol"] as string;
-  if (!file || !symbol) return "Error: 'file' and 'symbol' are required.";
+  if (!file || !symbol) return "Error: 'path' and 'symbol' are required.";
 
   const projectRoot = path.resolve(projectPath);
   const resolvedFile = path.isAbsolute(file) ? file : path.resolve(projectRoot, file);
@@ -124,8 +124,8 @@ export function execOutline(
   _index: Index,
   projectPath: string,
 ): string {
-  const file = args["file"] as string;
-  if (!file) return "Error: 'file' is required.";
+  const file = args["path"] as string;
+  if (!file) return "Error: 'path' is required.";
 
   const projectRoot = path.resolve(projectPath);
   const resolved = path.isAbsolute(file) ? file : path.resolve(projectRoot, file);

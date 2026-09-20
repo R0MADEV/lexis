@@ -15,7 +15,7 @@ export function execInvestigate(
   projectPath: string
 ): string {
   const name = args["name"] as string;
-  const fileFilter = args["file_filter"] as string | undefined;
+  const fileFilter = args["path_filter"] as string | undefined;
   if (!name) return "Error: 'name' is required.";
 
   const sections: string[] = [];

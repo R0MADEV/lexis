@@ -16,11 +16,25 @@ export function execPatternSearch(
 ): string {
   const pattern = args["pattern"] as string;
   const glob = args["glob"] as string | undefined;
+  const pathFilter = args["path_filter"] as string | undefined;
   const max = typeof args["max"] === "number" ? Math.min(args["max"], 100) : 20;
 
   if (!pattern || pattern.length < 2) return "Error: 'pattern' must be at least 2 chars.";
 
-  log(`[pattern_search] pattern="${pattern}" glob=${glob ?? "none"}`);
+  log(`[pattern_search] pattern="${pattern}" glob=${glob ?? "none"} path_filter=${pathFilter ?? "none"}`);
+
+  // When the filter names a real directory, hand it to ripgrep as the search
+  // root: it then walks less rather than merely reporting less. Otherwise treat
+  // it as a path substring and drop non-matching files from the aggregation.
+  let searchRoot = projectPath;
+  let pathNeedle: string | null = null;
+  if (pathFilter) {
+    const resolved = path.resolve(projectPath, pathFilter);
+    let isDir = false;
+    try { isDir = fs.statSync(resolved).isDirectory(); } catch { isDir = false; }
+    if (isDir) searchRoot = resolved;
+    else pathNeedle = pathFilter.toLowerCase();
+  }
 
   const rgArgs = [
     "--line-number", "--no-heading", "--max-filesize", "200K",
@@ -30,14 +44,15 @@ export function execPatternSearch(
     "--glob", "!**/*.lock", "--glob", "!**/*.min.*", "--glob", "!**/*.map",
   ];
   if (glob) rgArgs.push("--glob", glob);
-  rgArgs.push(projectPath);
+  rgArgs.push(searchRoot);
 
   let { stdout, stderr } = runRg(rgArgs);
 
+  const scopeNote = pathFilter ? ` under "${pathFilter}"` : "";
   if (!stdout.trim()) {
     return stderr.includes("regex parse error")
       ? `Invalid regex: ${pattern}\n${stderr.split("\n").slice(0, 3).join("\n")}`
-      : `No matches for pattern: ${pattern}`;
+      : `No matches for pattern: ${pattern}${scopeNote}`;
   }
 
   // Aggregate by file: count hits, keep first-line sample
@@ -50,6 +65,7 @@ export function execPatternSearch(
     if (!m) continue;
     const [, file, lineStr, content] = m;
     if (!file) continue;
+    if (pathNeedle && !file.toLowerCase().includes(pathNeedle)) continue;
     totalHits++;
     if (!byFile.has(file)) {
       byFile.set(file, {
@@ -68,8 +84,10 @@ export function execPatternSearch(
     return `  ${rel}:${info.sampleLine}  (×${info.count})  ${info.sample}`;
   });
 
+  if (byFile.size === 0) return `No matches for pattern: ${pattern}${scopeNote}`;
+
   const more = byFile.size > sorted.length ? ` (top ${sorted.length} of ${byFile.size} files)` : "";
-  return `Pattern "${pattern}" — ${totalHits} hits across ${byFile.size} file(s)${more}:\n\n${lines.join("\n")}`;
+  return `Pattern "${pattern}"${scopeNote} — ${totalHits} hits across ${byFile.size} file(s)${more}:\n\n${lines.join("\n")}`;
 }
 
 export function execTestsFor(

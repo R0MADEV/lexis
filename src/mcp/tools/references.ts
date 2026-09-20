@@ -180,7 +180,7 @@ export function execGetContext(
   index: Index,
   projectPath: string
 ): string {
-  const file = args["file"] as string;
+  const file = args["path"] as string;
   const line = typeof args["line"] === "number" ? args["line"] : parseInt(args["line"] as string, 10);
 
   log(`[get_context] file="${file}" line=${line}`);

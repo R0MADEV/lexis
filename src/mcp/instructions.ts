@@ -12,6 +12,7 @@ export const LEXIS_INSTRUCTIONS = `Lexis — code search. Use these tools INSTEA
 WORKFLOW: notes → list_entrypoints → search_code → get_symbol → read_file(offset,limit).
 
 DEFAULTS: output='compact', depth=1, top_k=3. Use context='bug'|'feature' to auto-tune.
+PATHS: 'path' = the file a tool reads. 'path_filter' = narrow any search by path.
 Use call_chain for flows, impact_analysis before refactor, reindex if results stale.
 
 CRITICAL — note() to persist findings (the chat is ephemeral — compaction WILL erase it mid-session; notes on disk survive it):

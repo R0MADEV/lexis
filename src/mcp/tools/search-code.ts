@@ -11,6 +11,17 @@ import { formatPathList } from "../runtime/path-utils";
 import { isUltraMode } from "../tool-filtering";
 import { buildTrace, formatSuggestions, detectLayer } from "../runtime/format";
 
+// Case-insensitive path-substring scope. Separators are normalized so a caller
+// can write "src/auth" on any platform.
+function pathNeedle(pathFilter: string): string {
+  return pathFilter.toLowerCase().split(/[\\/]/).filter(Boolean).join(path.sep);
+}
+
+function scopeIndex(index: Index, needle: string): Index {
+  const matches = (file: string): boolean => file.toLowerCase().includes(needle);
+  return { ...index, symbols: index.symbols.filter((s) => matches(s.file)), files: index.files.filter(matches) };
+}
+
 export function execSearchCode(
   args: Record<string, unknown>,
   index: Index,
@@ -26,11 +37,24 @@ export function execSearchCode(
 
   const topK = typeof args["top_k"] === "number" ? args["top_k"] : 3;
   const depth = typeof args["depth"] === "number" ? args["depth"] : defaultDepth;
+  const pathFilter = args["path_filter"] as string | undefined;
 
-  log(`[search_code] query="${query}" output=${output} topK=${topK} depth=${depth} context=${context ?? "auto"}`);
+  log(`[search_code] query="${query}" output=${output} topK=${topK} depth=${depth} context=${context ?? "auto"} path_filter=${pathFilter ?? "none"}`);
 
-  const rawResults = search(query, index, projectPath, topK, depth, intentOverride);
+  // Scoping narrows the index itself rather than only the result list, so
+  // excluded files stop competing for the top_k slots and ranking improves.
+  const needle = pathFilter ? pathNeedle(pathFilter) : null;
+  const scoped = needle ? scopeIndex(index, needle) : index;
+  if (needle && scoped.symbols.length === 0) {
+    return `No indexed files match path_filter "${pathFilter}".`;
+  }
+
+  // search() also runs a ripgrep pass over the project, which can surface files
+  // the scoped index excluded — so the scope is enforced on the results too.
+  const found = search(query, scoped, projectPath, topK, depth, intentOverride);
+  const rawResults = needle ? found.filter((r) => r.symbol.file.toLowerCase().includes(needle)) : found;
   if (rawResults.length === 0) {
+    if (needle) return `No results for "${query}" under path_filter "${pathFilter}".`;
     const suggestions = suggestSimilar(query, index, 5);
     return `No results found for "${query}".${formatSuggestions(suggestions, path.resolve(projectPath))}`;
   }

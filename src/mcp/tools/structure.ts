@@ -20,7 +20,7 @@ export function execDeadCode(
   index: Index,
   projectPath: string
 ): string {
-  const scope = args["scope"] as string | undefined;
+  const scope = args["path_filter"] as string | undefined;
   const limit = typeof args["limit"] === "number" ? Math.min(args["limit"], 100) : 30;
 
   log(`[dead_code] scope=${scope ?? "all"} limit=${limit}`);

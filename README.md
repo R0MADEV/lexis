@@ -39,10 +39,10 @@ Lexis is intentionally minimal:
 
 | Mode | Tokens to load |
 |---|---|
-| **Default** | **~4,170** |
-| **Ultra** (`LEXIS_COMPRESSION=ultra`) | **~2,770** |
+| **Default** | **~4,330** |
+| **Ultra** (`LEXIS_COMPRESSION=ultra`) | **~2,930** |
 
-Measured directly from the MCP `tools/list` payload + the `instructions` field, not estimated — 30 tools defined, 29 listed in this repo after project filtering. Descriptions average 50–100 chars per tool; no embedded examples in schemas; instructions field is **1,170 bytes**, not a user manual.
+Measured directly from the MCP `tools/list` payload + the `instructions` field, not estimated — 30 tools defined, 29 listed in this repo after project filtering. Descriptions average 50–100 chars per tool; no embedded examples in schemas; instructions field is **1,252 bytes**, not a user manual.
 
 Tools that don't apply to your project are filtered out automatically:
 
