@@ -11,3 +11,25 @@
 export function normalizeRgOutput(stdout: string): string {
   return stdout.replace(/\r\n/g, "\n");
 }
+
+export interface RgLine {
+  file: string;
+  line: number;
+  content: string;
+}
+
+// ripgrep prints "<file>:<line>:<content>", and the content can contain that
+// same shape — a test asserting on "a.ts:1:hello", a URL with a port, a
+// timestamp. A greedy leading group takes the LAST such marker in the line, so
+// the file becomes a fragment of source text and the line number comes out of
+// the code. The result still looks like a hit, which is why it went unnoticed.
+//
+// The first marker is the real one, so the file group is lazy. Content may be
+// empty: a match on a blank line is still a match.
+const RG_LINE = /^(.+?):(\d+):([\s\S]*)$/;
+
+export function parseRgLine(raw: string): RgLine | null {
+  const match = RG_LINE.exec(raw);
+  if (!match) return null;
+  return { file: match[1]!, line: Number(match[2]), content: match[3] ?? "" };
+}

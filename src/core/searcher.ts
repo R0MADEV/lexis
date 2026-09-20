@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { Index, Symbol } from "./indexer";
 import { pathFilterMatches } from "./path-match";
-import { normalizeRgOutput } from "./rg-output";
+import { normalizeRgOutput, parseRgLine } from "./rg-output";
 import { detectContext } from "./language-detector";
 import { intSetting } from "./settings";
 import {
@@ -964,14 +964,14 @@ function parseRipgrepOutput(output: string, terms: string[]): SearchResult[] {
   const seen = new Set<string>();
 
   for (const line of output.trim().split("\n").slice(0, 1000)) {
-    const match = line.match(/^(.+):(\d+):(.+)$/);
-    if (!match) continue;
+    const parsed = parseRgLine(line);
+    if (!parsed) continue;
 
-    const [, file, lineNum] = match;
-    if (!file || !isSearchableFile(path.basename(file))) continue;
+    const file = parsed.file;
+    if (!isSearchableFile(path.basename(file))) continue;
     if (file.includes("node_modules") || file.includes("/.git/")) continue;
 
-    const lineNumber = parseInt(lineNum);
+    const lineNumber = parsed.line;
     const { code, lineStart, lineEnd } = extractFunction(file, lineNumber);
 
     const key = `${file}:${lineStart}`;
