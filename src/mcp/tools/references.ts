@@ -6,6 +6,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { findReferences, getContext, suggestSimilar } from "../../core/searcher";
 import { attributeReferences } from "../../core/import-resolver";
+import { pathFilterMatches } from "../../core/path-match";
 import { Index } from "../../core/indexer";
 import { log } from "../runtime/jsonrpc";
 import { runRg } from "../runtime/ripgrep";
@@ -29,8 +30,7 @@ export function execFindReferences(
 
   let target: string | null = null;
   if (definedIn) {
-    const needle = definedIn.toLowerCase();
-    const matches = definitions.filter((d) => d.toLowerCase().includes(needle));
+    const matches = definitions.filter((d) => pathFilterMatches(d, definedIn));
     if (matches.length === 0) {
       return `No definition of "${symbol}" lives in a path matching "${definedIn}". Known definitions:\n${listDefinitions()}`;
     }

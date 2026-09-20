@@ -7,6 +7,11 @@ import { cleanupTmpProject } from "./test-utils";
 
 let tmpDir: string;
 
+// Indexed paths carry the platform separator; assertions below are written
+// with "/", so results are normalized. A no-op off Windows.
+const slash = (s: string) => s.replace(/\\/g, "/");
+const dispatchSlashed = (...args: Parameters<typeof dispatchTool>): string => slash(dispatchTool(...args));
+
 function write(rel: string, content: string) {
   const abs = path.join(tmpDir, rel);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -456,7 +461,7 @@ describe("dispatchTool — resolve_import (multi-language)", () => {
     write("src/lib/AuthService.ts", "export class AuthService { login() {} }");
     write("src/handlers/userHandler.ts", `import { AuthService } from "../lib/AuthService";\nclass UserHandler {}`);
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool(
+    const result = dispatchSlashed(
       "resolve_import",
       { file: "src/handlers/userHandler.ts", symbol: "AuthService" },
       idx, tmpDir,
@@ -469,7 +474,7 @@ describe("dispatchTool — resolve_import (multi-language)", () => {
     write("app/services/auth.py", "class AuthService:\n    def login(self): pass");
     write("app/handlers/user.py", "from app.services.auth import AuthService\nclass UserHandler: pass");
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool(
+    const result = dispatchSlashed(
       "resolve_import",
       { file: "app/handlers/user.py", symbol: "AuthService" },
       idx, tmpDir,
@@ -482,7 +487,7 @@ describe("dispatchTool — resolve_import (multi-language)", () => {
     write("src/Auth/AuthService.php", "<?php\nnamespace App\\Auth;\nclass AuthService {}");
     write("src/Handler/UserHandler.php", "<?php\nuse App\\Auth\\AuthService;\nclass UserHandler {}");
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool(
+    const result = dispatchSlashed(
       "resolve_import",
       { file: "src/Handler/UserHandler.php", symbol: "AuthService" },
       idx, tmpDir,
@@ -494,7 +499,7 @@ describe("dispatchTool — resolve_import (multi-language)", () => {
     write("src/a.ts", "export const a = 1;");
     write("src/b.ts", "import { a } from './a';");
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool(
+    const result = dispatchSlashed(
       "resolve_import",
       { file: "src/b.ts", symbol: "NeverImported" },
       idx, tmpDir,
@@ -507,7 +512,7 @@ describe("dispatchTool — resolve_import (multi-language)", () => {
     write("src/app/Home.tsx", "export function handleClick() { return 'app'; }");
     write("src/other/Dashboard.tsx", `import { handleClick } from '../app/Home';\nhandleClick();`);
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool(
+    const result = dispatchSlashed(
       "resolve_import",
       { file: "src/other/Dashboard.tsx", symbol: "handleClick" },
       idx, tmpDir,
@@ -521,7 +526,7 @@ describe("dispatchTool — resolve_import (multi-language)", () => {
     write("src/Admin/Widget.php", "<?php\nnamespace App\\Admin;\nclass Widget {}");
     write("src/Handler/UserHandler.php", "<?php\nuse App\\Admin\\Widget;\nclass UserHandler {}");
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool(
+    const result = dispatchSlashed(
       "resolve_import",
       { file: "src/Handler/UserHandler.php", symbol: "Widget" },
       idx, tmpDir,
@@ -535,7 +540,7 @@ describe("dispatchTool — resolve_import (multi-language)", () => {
     write("src/api/home.rs", "pub fn handle_click() -> u8 { 2 }");
     write("src/main.rs", "use crate::ui::home::handle_click;\nfn main() { handle_click(); }");
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool(
+    const result = dispatchSlashed(
       "resolve_import",
       { file: "src/main.rs", symbol: "handle_click" },
       idx, tmpDir,
@@ -549,7 +554,7 @@ describe("dispatchTool — resolve_import (multi-language)", () => {
     write("src/app/Home.tsx", "export function handleClick() { return 'app'; }");
     write("src/other/Dashboard.tsx", `import { handleClick } from 'some-package';\nhandleClick();`);
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool(
+    const result = dispatchSlashed(
       "resolve_import",
       { file: "src/other/Dashboard.tsx", symbol: "handleClick" },
       idx, tmpDir,
@@ -572,7 +577,7 @@ describe("dispatchTool — same-name symbol attribution", () => {
   test("find_references groups references under the definition each one binds to", () => {
     writeAmbiguousProject();
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool("find_references", { symbol: "handleClick" }, idx, tmpDir);
+    const result = dispatchSlashed("find_references", { symbol: "handleClick" }, idx, tmpDir);
 
     const adminBlock = result.slice(result.indexOf("DEFINITION: src/admin/Home.ts"));
     expect(adminBlock).toContain("admin/Panel.ts");
@@ -584,7 +589,7 @@ describe("dispatchTool — same-name symbol attribution", () => {
   test("find_references reports what it could not bind instead of merging it in", () => {
     writeAmbiguousProject();
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool("find_references", { symbol: "handleClick" }, idx, tmpDir);
+    const result = dispatchSlashed("find_references", { symbol: "handleClick" }, idx, tmpDir);
     const tail = result.slice(result.indexOf("UNATTRIBUTED"));
     expect(tail).toContain("legacy/old.ts");
   });
@@ -592,7 +597,7 @@ describe("dispatchTool — same-name symbol attribution", () => {
   test("find_references with defined_in returns only that definition's references", () => {
     writeAmbiguousProject();
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool("find_references", { symbol: "handleClick", defined_in: "src/admin" }, idx, tmpDir);
+    const result = dispatchSlashed("find_references", { symbol: "handleClick", defined_in: "src/admin" }, idx, tmpDir);
     expect(result).toContain("admin/Panel.ts");
     expect(result).not.toContain("app/Board.ts");
   });
@@ -600,7 +605,7 @@ describe("dispatchTool — same-name symbol attribution", () => {
   test("find_references says which definitions exist when defined_in matches none", () => {
     writeAmbiguousProject();
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool("find_references", { symbol: "handleClick", defined_in: "nowhere" }, idx, tmpDir);
+    const result = dispatchSlashed("find_references", { symbol: "handleClick", defined_in: "nowhere" }, idx, tmpDir);
     expect(result).toContain("admin/Home.ts");
     expect(result).toContain("app/Home.ts");
   });
@@ -609,7 +614,7 @@ describe("dispatchTool — same-name symbol attribution", () => {
     write("src/lib/onlyOne.ts", "export function onlyOne() { return 1; }");
     write("src/app/uses.ts", "import { onlyOne } from '../lib/onlyOne';\nonlyOne();");
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool("find_references", { symbol: "onlyOne" }, idx, tmpDir);
+    const result = dispatchSlashed("find_references", { symbol: "onlyOne" }, idx, tmpDir);
     expect(result).not.toContain("DEFINITION:");
     expect(result).not.toContain("UNATTRIBUTED");
     expect(result).toContain("uses.ts");
@@ -618,7 +623,7 @@ describe("dispatchTool — same-name symbol attribution", () => {
   test("impact_analysis flags that its numbers merge several definitions", () => {
     writeAmbiguousProject();
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool("impact_analysis", { symbol: "handleClick" }, idx, tmpDir);
+    const result = dispatchSlashed("impact_analysis", { symbol: "handleClick" }, idx, tmpDir);
     expect(result).toContain("AMBIGUOUS");
     expect(result).toContain("defined_in");
   });
@@ -626,7 +631,7 @@ describe("dispatchTool — same-name symbol attribution", () => {
   test("impact_analysis with defined_in scopes the blast radius to one definition", () => {
     writeAmbiguousProject();
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool("impact_analysis", { symbol: "handleClick", defined_in: "src/admin" }, idx, tmpDir);
+    const result = dispatchSlashed("impact_analysis", { symbol: "handleClick", defined_in: "src/admin" }, idx, tmpDir);
     expect(result).not.toContain("AMBIGUOUS");
     expect(result).toContain("admin/Home.ts");
     expect(result).not.toContain("app/Board.ts");
@@ -638,7 +643,7 @@ describe("dispatchTool — path scoping", () => {
     write("src/auth/login.ts", "export function handleClick() { return 1; }");
     write("tests/auth/login.test.ts", "export function handleClick() { return 2; }");
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool(
+    const result = dispatchSlashed(
       "search_code",
       { query: "handleClick", output: "files", top_k: 10, path_filter: "src/" },
       idx, tmpDir,
@@ -651,7 +656,7 @@ describe("dispatchTool — path scoping", () => {
     write("src/auth/login.ts", "export function handleClick() { return 1; }");
     write("tests/auth/login.test.ts", "export function handleClick() { return 2; }");
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool(
+    const result = dispatchSlashed(
       "search_code",
       { query: "handleClick", output: "files", top_k: 10 },
       idx, tmpDir,
@@ -662,7 +667,7 @@ describe("dispatchTool — path scoping", () => {
   test("search_code says so when path_filter excludes everything", () => {
     write("src/auth/login.ts", "export function handleClick() { return 1; }");
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool(
+    const result = dispatchSlashed(
       "search_code",
       { query: "handleClick", output: "files", path_filter: "does/not/exist" },
       idx, tmpDir,
@@ -674,7 +679,7 @@ describe("dispatchTool — path scoping", () => {
     write("src/a.ts", "// TODO: real work");
     write("docs/b.ts", "// TODO: documentation");
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool("pattern_search", { pattern: "TODO", path_filter: "src" }, idx, tmpDir);
+    const result = dispatchSlashed("pattern_search", { pattern: "TODO", path_filter: "src" }, idx, tmpDir);
     expect(result).toContain("src/a.ts");
     expect(result).not.toContain("docs/b.ts");
   });
@@ -683,7 +688,7 @@ describe("dispatchTool — path scoping", () => {
     write("src/auth/a.ts", "// TODO: one");
     write("src/billing/b.ts", "// TODO: two");
     const idx = indexProject(tmpDir, null);
-    const result = dispatchTool("pattern_search", { pattern: "TODO", path_filter: "auth" }, idx, tmpDir);
+    const result = dispatchSlashed("pattern_search", { pattern: "TODO", path_filter: "auth" }, idx, tmpDir);
     expect(result).toContain("auth/a.ts");
     expect(result).not.toContain("billing");
   });
@@ -693,8 +698,8 @@ describe("dispatchTool — parameter aliases", () => {
   test("outline accepts both path and the older file", () => {
     write("src/a.ts", "export function alpha() { return 1; }");
     const idx = indexProject(tmpDir, null);
-    const viaPath = dispatchTool("outline", { path: "src/a.ts" }, idx, tmpDir);
-    const viaFile = dispatchTool("outline", { file: "src/a.ts" }, idx, tmpDir);
+    const viaPath = dispatchSlashed("outline", { path: "src/a.ts" }, idx, tmpDir);
+    const viaFile = dispatchSlashed("outline", { file: "src/a.ts" }, idx, tmpDir);
     expect(viaPath).toContain("alpha");
     expect(viaFile).toBe(viaPath);
   });
@@ -703,8 +708,8 @@ describe("dispatchTool — parameter aliases", () => {
     write("src/admin/Widget.ts", "export class Widget { admin() {} }");
     write("src/app/Widget.ts", "export class Widget { app() {} }");
     const idx = indexProject(tmpDir, null);
-    const viaNew = dispatchTool("get_symbol", { name: "Widget", path_filter: "src/admin" }, idx, tmpDir);
-    const viaOld = dispatchTool("get_symbol", { name: "Widget", file_filter: "src/admin" }, idx, tmpDir);
+    const viaNew = dispatchSlashed("get_symbol", { name: "Widget", path_filter: "src/admin" }, idx, tmpDir);
+    const viaOld = dispatchSlashed("get_symbol", { name: "Widget", file_filter: "src/admin" }, idx, tmpDir);
     expect(viaNew).toContain("admin");
     expect(viaOld).toBe(viaNew);
   });
@@ -713,8 +718,8 @@ describe("dispatchTool — parameter aliases", () => {
     write("src/legacy/unused.ts", "export function neverCalled() { return 1; }");
     write("src/app/used.ts", "export function alsoUnused() { return 2; }");
     const idx = indexProject(tmpDir, null);
-    const viaNew = dispatchTool("dead_code", { path_filter: "src/legacy" }, idx, tmpDir);
-    const viaOld = dispatchTool("dead_code", { scope: "src/legacy" }, idx, tmpDir);
+    const viaNew = dispatchSlashed("dead_code", { path_filter: "src/legacy" }, idx, tmpDir);
+    const viaOld = dispatchSlashed("dead_code", { scope: "src/legacy" }, idx, tmpDir);
     expect(viaOld).toBe(viaNew);
   });
 });

@@ -6,6 +6,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getSymbol, suggestSimilar } from "../../core/searcher";
 import { Index } from "../../core/indexer";
+import { pathFilterMatches } from "../../core/path-match";
 import { log } from "../runtime/jsonrpc";
 import { runRg } from "../runtime/ripgrep";
 import { formatSuggestions } from "../runtime/format";
@@ -33,7 +34,7 @@ export function execPatternSearch(
     let isDir = false;
     try { isDir = fs.statSync(resolved).isDirectory(); } catch { isDir = false; }
     if (isDir) searchRoot = resolved;
-    else pathNeedle = pathFilter.toLowerCase();
+    else pathNeedle = pathFilter;
   }
 
   const rgArgs = [
@@ -65,7 +66,7 @@ export function execPatternSearch(
     if (!m) continue;
     const [, file, lineStr, content] = m;
     if (!file) continue;
-    if (pathNeedle && !file.toLowerCase().includes(pathNeedle)) continue;
+    if (pathNeedle && !pathFilterMatches(file, pathNeedle)) continue;
     totalHits++;
     if (!byFile.has(file)) {
       byFile.set(file, {

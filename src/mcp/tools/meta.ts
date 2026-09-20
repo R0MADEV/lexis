@@ -11,6 +11,7 @@ import { spawnSync } from "child_process";
 import { Index } from "../../core/indexer";
 import { getSymbol } from "../../core/searcher";
 import { attributeReference, findImportSpecifier } from "../../core/import-resolver";
+import { pathFilterMatches } from "../../core/path-match";
 import { detectLinter } from "../tool-filtering";
 import { runRg } from "../runtime/ripgrep";
 import { formatPathList } from "../runtime/path-utils";
@@ -19,7 +20,7 @@ export function execLint(
   args: Record<string, unknown>,
   projectPath: string,
 ): string {
-  const pathFilter = (args["path_filter"] as string | undefined)?.toLowerCase();
+  const pathFilter = args["path_filter"] as string | undefined;
 
   const detected = detectLinter(projectPath);
   if (!detected) {
@@ -52,7 +53,7 @@ export function execLint(
     if (!m) continue;
     const [, file, lineNum, col, kind, msg] = m;
     const fileStr = file ?? "";
-    if (pathFilter && !fileStr.toLowerCase().includes(pathFilter)) continue;
+    if (pathFilter && !pathFilterMatches(fileStr, pathFilter)) continue;
 
     const rel = path.isAbsolute(fileStr) ? path.relative(projectRoot, fileStr) : fileStr;
     const key = `${rel}:${lineNum}:${col ?? "0"}`;
@@ -191,7 +192,7 @@ export function execListTodos(
   args: Record<string, unknown>,
   projectPath: string,
 ): string {
-  const pathFilter = (args["path_filter"] as string | undefined)?.toLowerCase();
+  const pathFilter = args["path_filter"] as string | undefined;
   const limit = typeof args["limit"] === "number" ? args["limit"] : 50;
 
   const rgArgs = [
@@ -213,7 +214,7 @@ export function execListTodos(
     const m = line.match(/^(.+?):(\d+):(.*)$/);
     if (!m) continue;
     const [, file, lineNum, content] = m;
-    if (pathFilter && !(file ?? "").toLowerCase().includes(pathFilter)) continue;
+    if (pathFilter && !pathFilterMatches(file ?? "", pathFilter)) continue;
 
     const rel = path.relative(projectRoot, file ?? "");
     const trimmed = (content ?? "").trim().slice(0, 120);

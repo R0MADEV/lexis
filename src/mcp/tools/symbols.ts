@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getSymbol, suggestSimilar } from "../../core/searcher";
 import { Index } from "../../core/indexer";
+import { pathFilterMatches } from "../../core/path-match";
 import { log } from "../runtime/jsonrpc";
 import { runRg } from "../runtime/ripgrep";
 import { rankFiles } from "../runtime/search-utils";
@@ -14,11 +15,11 @@ export function execListSymbols(
   args: Record<string, unknown>,
   index: Index
 ): string {
-  const fileFilter = (args["path_filter"] as string | undefined)?.toLowerCase();
+  const fileFilter = args["path_filter"] as string | undefined;
   const nameFilter = (args["name_filter"] as string | undefined)?.toLowerCase();
 
   let symbols = index.symbols;
-  if (fileFilter) symbols = symbols.filter((s) => s.file.toLowerCase().includes(fileFilter));
+  if (fileFilter) symbols = symbols.filter((s) => pathFilterMatches(s.file, fileFilter));
   if (nameFilter) symbols = symbols.filter((s) => s.name.toLowerCase().includes(nameFilter));
 
   log(`[list_symbols] ${symbols.length} results`);

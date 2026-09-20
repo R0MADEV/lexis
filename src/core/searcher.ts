@@ -2,6 +2,7 @@ import { spawnSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { Index, Symbol } from "./indexer";
+import { pathFilterMatches } from "./path-match";
 import { detectContext } from "./language-detector";
 import {
   AnalyzedQuery,
@@ -1370,14 +1371,14 @@ export function getSymbol(
   let candidates = index.symbols.filter(
     (s) =>
       s.name.toLowerCase() === symbolName.toLowerCase() &&
-      (!fileFilter || s.file.toLowerCase().includes(fileFilter.toLowerCase()))
+      (!fileFilter || pathFilterMatches(s.file, fileFilter))
   );
 
   if (candidates.length === 0) {
     candidates = index.symbols.filter(
       (s) =>
         s.name.toLowerCase().includes(symbolName.toLowerCase()) &&
-        (!fileFilter || s.file.toLowerCase().includes(fileFilter.toLowerCase()))
+        (!fileFilter || pathFilterMatches(s.file, fileFilter))
     );
   }
 

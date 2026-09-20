@@ -6,7 +6,9 @@ import {
   attributeReferences,
 } from "../core/import-resolver";
 
-const ROOT = "/proj";
+// path.resolve() adds the drive letter on Windows while path.join() does not,
+// so the fixture root is resolved once and every path derives from it.
+const ROOT = path.resolve("/proj");
 const p = (rel: string) => path.join(ROOT, rel);
 
 describe("findImportSpecifier", () => {

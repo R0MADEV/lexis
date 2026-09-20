@@ -10,6 +10,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getSymbol, findReferences, suggestSimilar } from "../../core/searcher";
 import { attributeReferences } from "../../core/import-resolver";
+import { pathFilterMatches } from "../../core/path-match";
 import { Index, Symbol as IndexedSymbol } from "../../core/indexer";
 import { log } from "../runtime/jsonrpc";
 import { runRg } from "../runtime/ripgrep";
@@ -42,7 +43,7 @@ export function execDeadCode(
     if (s.name.startsWith("test")) return false;       // test functions are entry points
     if (s.type === "variable" || s.type === "unknown") return false;
     if (/[/_](test|spec)/i.test(s.file)) return false;  // test files don't count
-    if (scope && !s.file.includes(scope)) return false;
+    if (scope && !pathFilterMatches(s.file, scope)) return false;
     return true;
   });
 
