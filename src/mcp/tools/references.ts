@@ -7,6 +7,7 @@ import * as path from "path";
 import { findReferences, getContext, suggestSimilar } from "../../core/searcher";
 import { attributeReferences } from "../../core/import-resolver";
 import { pathFilterMatches } from "../../core/path-match";
+import { enclosingSymbol } from "../../core/enclosing-symbol";
 import { Index } from "../../core/indexer";
 import { log } from "../runtime/jsonrpc";
 import { runRg } from "../runtime/ripgrep";
@@ -136,9 +137,7 @@ export function execFindReferences(
     // include 'other' to catch DI / property declarations (typed constructor args in PHP, fields in Java/C#)
     for (const ref of refs.filter((r) => r.kind === "call" || r.kind === "type" || r.kind === "other")) {
       // find the innermost indexed symbol that contains this reference line
-      const enc = index.symbols
-        .filter((s) => s.file === ref.file && s.lineStart <= ref.line)
-        .sort((a, b) => b.lineStart - a.lineStart)[0];
+      const enc = enclosingSymbol(index.symbols.filter((s) => s.file === ref.file), ref.line);
       if (!enc || enc.name.length < 4 || enc.name === symbol) continue;
       // walk up the file's symbols to find a non-generic enclosing context
       let chosen = enc;

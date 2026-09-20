@@ -6,6 +6,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { spawnSync } from "child_process";
 import { Index } from "../../core/indexer";
+import { enclosingSymbol } from "../../core/enclosing-symbol";
 import { log } from "../runtime/jsonrpc";
 
 export function execGitContext(
@@ -206,9 +207,7 @@ export function execRecentChanges(
 
     const touchedSymbols = new Set<string>();
     for (const line of touchedLines) {
-      const sym = fileSymbols
-        .filter((s) => s.lineStart <= line && s.lineEnd >= line)
-        .sort((a, b) => b.lineStart - a.lineStart)[0];
+      const sym = enclosingSymbol(fileSymbols, line);
       if (sym && sym.name.length > 1) touchedSymbols.add(sym.name);
     }
     return [...touchedSymbols].slice(0, 5);
