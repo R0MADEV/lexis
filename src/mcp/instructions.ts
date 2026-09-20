@@ -14,8 +14,9 @@ WORKFLOW: notes → list_entrypoints → search_code → get_symbol → read_fil
 DEFAULTS: output='compact', depth=1, top_k=3. Use context='bug'|'feature' to auto-tune.
 Use call_chain for flows, impact_analysis before refactor, reindex if results stale.
 
-CRITICAL — note() to persist findings (the MCP can't see the chat):
+CRITICAL — note() to persist findings (the chat is ephemeral — compaction WILL erase it mid-session; notes on disk survive it):
 - ALWAYS save when: root cause found, design decision made, hypothesis ruled out, task completed.
+- In long sessions, ALSO checkpoint working state before it's lost: current hypothesis, paths ruled out, key files in play. Don't wait for a clean conclusion — compaction doesn't.
 - GOOD: "Bug X from Y. The W clue is misleading — actually unrelated." with tags+files.
 - BAD: "started investigating", "found ClassX" (already in index), process commentary.
 
