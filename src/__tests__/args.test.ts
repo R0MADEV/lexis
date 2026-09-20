@@ -74,3 +74,36 @@ describe("validateArgs", () => {
     expect(validateArgs("dead_code", normalizeArgs("dead_code", { scope: "src" }))).toBeNull();
   });
 });
+
+describe("validateArgs — did you mean", () => {
+  test("points at the parameter the name was a near-miss for", () => {
+    const error = validateArgs("search_code", { query: "x", path: "src/" });
+    expect(error).toContain("Did you mean 'path_filter'");
+  });
+
+  test("catches the same near-miss on pattern_search", () => {
+    expect(validateArgs("pattern_search", { pattern: "TODO", path: "src" }))
+      .toContain("Did you mean 'path_filter'");
+  });
+
+  test("catches a typo", () => {
+    expect(validateArgs("read_file", { path: "a.ts", offest: 3 }))
+      .toContain("Did you mean 'offset'");
+  });
+
+  test("stays quiet when nothing is close, rather than inventing a guess", () => {
+    const error = validateArgs("find_references", { symbol: "x", wobble: 1 });
+    expect(error).not.toContain("Did you mean");
+    expect(error).toContain("defined_in");
+  });
+
+  test("a one or two letter name is not treated as a prefix of everything", () => {
+    expect(validateArgs("find_references", { symbol: "x", s: 1 })).not.toContain("Did you mean");
+  });
+
+  test("still lists the accepted parameters alongside the suggestion", () => {
+    const error = validateArgs("search_code", { query: "x", path: "src/" });
+    expect(error).toContain("Accepted:");
+    expect(error).toContain("top_k");
+  });
+});

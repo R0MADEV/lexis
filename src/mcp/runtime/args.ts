@@ -17,6 +17,7 @@
 // it selects which definition to report on, not where results may live.
 
 import { TOOLS } from "../tools-registry";
+import { editDistance } from "../../core/searcher";
 
 const ALIASES: Record<string, Record<string, string>> = {
   outline:        { file: "path" },
@@ -76,7 +77,43 @@ export function validateArgs(tool: string, args: Record<string, unknown>): strin
 
   const named = unknown.map((u) => `'${u}'`).join(", ");
   const accepts = allowed.length > 0 ? allowed.join(", ") : "(no parameters)";
-  return `Error: ${tool} does not accept ${named}. Accepted: ${accepts}.\n` +
+
+  const suggestions = [...new Set(unknown.map((u) => closestParam(u, allowed)).filter(Boolean))];
+  const hint = suggestions.length > 0
+    ? ` Did you mean ${suggestions.map((s) => `'${s}'`).join(", ")}?`
+    : "";
+
+  return `Error: ${tool} does not accept ${named}.${hint} Accepted: ${accepts}.\n` +
     `The call was refused rather than run without it — passing an unsupported ` +
     `scope would have returned results wider than you asked for.`;
+}
+
+// The two ways a parameter name goes wrong. A near-miss on the concept — "path"
+// where the tool declares "path_filter" — is textually a prefix, not a typo, so
+// edit distance never catches it; that one is the failure issue #2 described.
+// A genuine typo is the other, and two edits covers it. Names under three
+// characters are excluded from the containment rule, or "s" would look like a
+// prefix of half the registry.
+const MIN_CONTAINMENT_LENGTH = 3;
+const MAX_TYPO_DISTANCE = 2;
+
+function closestParam(unknown: string, allowed: string[]): string | null {
+  const name = unknown.toLowerCase();
+
+  if (name.length >= MIN_CONTAINMENT_LENGTH) {
+    const related = allowed.find((a) => {
+      const candidate = a.toLowerCase();
+      return candidate.includes(name) || name.includes(candidate);
+    });
+    if (related) return related;
+  }
+
+  let best: { name: string; distance: number } | null = null;
+  for (const candidate of allowed) {
+    const distance = editDistance(name, candidate.toLowerCase(), MAX_TYPO_DISTANCE);
+    if (distance <= MAX_TYPO_DISTANCE && (!best || distance < best.distance)) {
+      best = { name: candidate, distance };
+    }
+  }
+  return best?.name ?? null;
 }

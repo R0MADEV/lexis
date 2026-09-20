@@ -1561,7 +1561,7 @@ export interface Suggestion {
 }
 
 // Two-row Levenshtein, lowercased, early-exit when distance exceeds threshold.
-function editDistance(a: string, b: string, threshold: number): number {
+export function editDistance(a: string, b: string, threshold: number): number {
   const al = a.length;
   const bl = b.length;
   if (Math.abs(al - bl) > threshold) return threshold + 1;
