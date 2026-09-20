@@ -7,10 +7,10 @@ Use Lexis MCP tools as the primary way to navigate this codebase.
 
 ## Flow
 1. \`notes\` — recall context from previous sessions
-2. \`list_entrypoints\` — understand project structure
-3. \`search_code(query)\` — find code by keyword (compact output by default)
-4. \`get_symbol(name)\` — get a function/class implementation
-5. \`read_file(path, offset, limit)\` — only when you need a specific range
+2. \`investigate(name)\` — definition + callers + tests in ONE call. Prefer this over chaining get_symbol + find_references + tests_for
+3. \`search_code(query)\` — locate code by concept when you don't have a symbol name
+4. \`read_file(path, offset, limit)\` — only for a range you still need afterwards
+5. \`list_entrypoints\` — project structure, when the repo is unfamiliar to you
 
 ## Rules
 - Do NOT read entire files when you can search. Use offset/limit on read_file.

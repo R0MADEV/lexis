@@ -9,7 +9,8 @@ import { detectBranch, isMainBranch, loadNotesForCurrentBranch } from "../adapte
 
 export const LEXIS_INSTRUCTIONS = `Lexis — code search. Use these tools INSTEAD of reading files.
 
-WORKFLOW: notes → list_entrypoints → search_code → get_symbol → read_file(offset,limit).
+WORKFLOW: notes → investigate(name): def + callers + tests in ONE call, instead of get_symbol+find_references+tests_for.
+search_code to locate by concept. read_file(offset,limit) only for a range you still need. list_entrypoints only in an unfamiliar repo.
 
 DEFAULTS: output='compact', depth=1, top_k=3. Use context='bug'|'feature' to auto-tune.
 PATHS: 'path' = the file a tool reads. 'path_filter' = narrow any search by path.
