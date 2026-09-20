@@ -37,12 +37,12 @@ A real concern with MCP servers: some add **20,000+ tokens** to every session ju
 
 Lexis is intentionally minimal:
 
-| Mode | Tools loaded | Tokens to load |
-|---|---|---|
-| **Default** | 30 | **~3,800** |
-| **Ultra** (`LEXIS_COMPRESSION=ultra`) | 29 | **~2,500** |
+| Mode | Tokens to load |
+|---|---|
+| **Default** | **~3,990** |
+| **Ultra** (`LEXIS_COMPRESSION=ultra`) | **~2,690** |
 
-Measured directly from the MCP `tools/list` payload + the `instructions` field, not estimated. Descriptions average 50–100 chars per tool; no embedded examples in schemas; instructions field is **770 bytes**, not a user manual.
+Measured directly from the MCP `tools/list` payload + the `instructions` field, not estimated — 30 tools defined, 29 listed in this repo after project filtering. Descriptions average 50–100 chars per tool; no embedded examples in schemas; instructions field is **1,170 bytes**, not a user manual.
 
 Tools that don't apply to your project are filtered out automatically:
 
@@ -53,7 +53,7 @@ Tools that don't apply to your project are filtered out automatically:
 
 **Design rule:** every feature pays its own token cost. If the load cost is bigger than the per-query saving, it doesn't belong in the registry. That's why there's no embeddings client, no vector DB, no per-language LSP processes — each would add weight that has to be justified.
 
-> Reproduce the numbers yourself: `node -e "const t=require('lexis-mcp/dist/mcp/tools-registry.js').TOOLS; console.log(Math.round(JSON.stringify(t).length/3.5),'tokens')"`
+> Reproduce the numbers yourself: clone the repo, then `npm run build && node measure-load.mjs`.
 
 ---
 

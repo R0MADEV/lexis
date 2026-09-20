@@ -14,7 +14,7 @@ export function isUltraMode(): boolean {
 
 // One-line ultra descriptions for the most common tools.
 const ULTRA_DESCRIPTIONS: Record<string, string> = {
-  search_code:    "Search code (compact|content|files, ctx bug|feature).",
+  search_code:    "Search code, not regex (compact|content, ctx bug|feature).",
   get_symbol:     "Get fn/class def by name.",
   read_file:      "Read file (path, offset, limit).",
   find_references: "Find usages of symbol.",
@@ -23,7 +23,7 @@ const ULTRA_DESCRIPTIONS: Record<string, string> = {
   list_entrypoints: "Routes/CLI/handlers/crons.",
   call_chain:     "Trace callers up/down.",
   get_context:    "fn+callers+tests for file:line.",
-  pattern_search: "Multi-pattern grep AND/OR.",
+  pattern_search: "Regex grep for audits; 1 line per file.",
   find_writes:    "Find code writing to a file.",
   git_context:    "Branches+commits by keyword.",
   recent_changes: "Files changed in N days.",

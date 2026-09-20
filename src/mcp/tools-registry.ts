@@ -5,7 +5,7 @@
 export const TOOLS = [
   {
     name: "search_code",
-    description: "Search code. output: snippet|compact|content|files|count|trace|signatures|arch (default compact). depth 1-2 (default 1). top_k default 3. context: bug|feature (auto-tunes depth and ranking).",
+    description: "Search code by identifier or concept. Query is tokenized, NOT a regex — for regex or alternation ('TODO|FIXME') use pattern_search. Returns ranked matches across the project. output: compact (default) file:line + signature + 1 body line | snippet match line only | content full bodies, budget-capped | files paths only | count total | trace call flow | signatures | arch. depth 1-2 (default 1). top_k default 3. context: bug|feature (auto-tunes depth and ranking).",
     inputSchema: {
       type: "object",
       properties: {
@@ -204,7 +204,7 @@ export const TOOLS = [
   },
   {
     name: "pattern_search",
-    description: "Regex search across the codebase for code-quality patterns: 'console.log', 'TODO|FIXME|HACK', 'catch.*\\{\\s*\\}', empty error handlers, large switch statements, etc. Output is grouped by file with hit counts. Use for audits / cleanup.",
+    description: "PCRE regex search for code-quality audits: 'console.log', 'TODO|FIXME|HACK', 'catch.*\\{\\s*\\}', empty error handlers. Returns ONE line per file — path:firstLine (xN hits) sample — ranked by hit count, never one line per match; to enumerate every match inside a file use read_file. For identifier or concept lookup use search_code instead.",
     inputSchema: {
       type: "object",
       properties: {
