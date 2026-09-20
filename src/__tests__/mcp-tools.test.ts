@@ -694,6 +694,35 @@ describe("dispatchTool — path scoping", () => {
   });
 });
 
+describe("dispatchTool — CRLF files", () => {
+  const CRLF = "export class Hello {\r\n  world() {}\r\n}\r\n";
+  const LF = "export class Hello {\n  world() {}\n}\n";
+
+  test("pattern_search sees a CRLF file, not just the LF one next to it", () => {
+    write("src/crlf.ts", CRLF);
+    write("src/lf.ts", LF);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchSlashed("pattern_search", { pattern: "Hello" }, idx, tmpDir);
+    expect(result).toContain("lf.ts");
+    expect(result).toContain("crlf.ts");
+  });
+
+  test("find_references sees a usage written with CRLF", () => {
+    write("src/def.ts", "export function handleClick() { return 1; }\n");
+    write("src/crlfUser.ts", "import { handleClick } from './def';\r\nhandleClick();\r\n");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchSlashed("find_references", { symbol: "handleClick" }, idx, tmpDir);
+    expect(result).toContain("crlfUser.ts");
+  });
+
+  test("list_todos sees a marker on a CRLF line", () => {
+    write("src/todo.ts", "// TODO: crlf marker\r\nexport const x = 1;\r\n");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchSlashed("list_todos", {}, idx, tmpDir);
+    expect(result).toContain("todo.ts");
+  });
+});
+
 describe("dispatchTool — unknown parameters", () => {
   test("refuses a scoping parameter the tool does not support, instead of ignoring it", () => {
     write("src/auth/login.ts", "export function handleClick() { return 1; }");

@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { Index, Symbol } from "./indexer";
 import { pathFilterMatches } from "./path-match";
+import { normalizeRgOutput } from "./rg-output";
 import { detectContext } from "./language-detector";
 import {
   AnalyzedQuery,
@@ -783,7 +784,7 @@ function searchWithRipgrep(terms: string[], projectPath: string, rgPath: string)
   );
 
   if (result.status !== 0 && !result.stdout) return [];
-  return parseRipgrepOutput(result.stdout ?? "", terms);
+  return parseRipgrepOutput(normalizeRgOutput(result.stdout ?? ""), terms);
 }
 
 const SEARCHABLE_EXTS = /\.(ts|tsx|js|jsx|mjs|cjs|py|rs|go|rb|java|kt|kts|cs|cpp|cc|cxx|c|h|hpp|php|swift|dart|vue|svelte|scala|ex|exs)$/i;
@@ -1449,7 +1450,7 @@ export function findReferences(symbolName: string, projectPath: string, index: I
       ],
       { encoding: "utf-8" }
     );
-    stdout = result.stdout ?? "";
+    stdout = normalizeRgOutput(result.stdout ?? "");
   }
 
   const defSet = new Set(

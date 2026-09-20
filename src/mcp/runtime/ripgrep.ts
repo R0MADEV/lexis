@@ -3,6 +3,7 @@
 
 import * as fs from "fs";
 import { spawnSync } from "child_process";
+import { normalizeRgOutput } from "../../core/rg-output";
 
 const log = (...args: unknown[]) => process.stderr.write(args.join(" ") + "\n");
 
@@ -27,7 +28,7 @@ export function runRg(args: string[]): { stdout: string; stderr: string } {
   const rg = resolveRg();
   if (!rg) return { stdout: "", stderr: "ripgrep not available" };
   const r = spawnSync(rg, args, { encoding: "utf-8" });
-  return { stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+  return { stdout: normalizeRgOutput(r.stdout ?? ""), stderr: r.stderr ?? "" };
 }
 
 // Standard ignore globs used across most ripgrep calls in the codebase.
