@@ -13,6 +13,9 @@ build/
 # Lexis index files
 .lexis/
 
+# Signal MCP run artifacts
+.signal/
+
 # OS
 .DS_Store
 Thumbs.db
