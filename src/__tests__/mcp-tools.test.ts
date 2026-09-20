@@ -694,6 +694,24 @@ describe("dispatchTool — path scoping", () => {
   });
 });
 
+describe("dispatchTool — unknown parameters", () => {
+  test("refuses a scoping parameter the tool does not support, instead of ignoring it", () => {
+    write("src/auth/login.ts", "export function handleClick() { return 1; }");
+    write("other/elsewhere.ts", "import { handleClick } from '../src/auth/login';\nhandleClick();");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("find_references", { symbol: "handleClick", path: "src/auth" }, idx, tmpDir);
+    expect(result).toContain("path");
+    expect(result).not.toContain("elsewhere.ts");
+  });
+
+  test("a valid call is unaffected", () => {
+    write("src/auth/login.ts", "export function handleClick() { return 1; }");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("find_references", { symbol: "handleClick" }, idx, tmpDir);
+    expect(result).toContain("login.ts");
+  });
+});
+
 describe("dispatchTool — parameter aliases", () => {
   test("outline accepts both path and the older file", () => {
     write("src/a.ts", "export function alpha() { return 1; }");

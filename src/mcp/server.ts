@@ -23,7 +23,7 @@ import { TOOLS } from "./tools-registry";
 // Re-exported for existing tests.
 import { findEnclosingSignatures, truncateIfExcessive, rankFiles, identTokens, globToRegex } from "./runtime/search-utils";
 import { baseFileName, compressPaths, formatPathList } from "./runtime/path-utils";
-import { normalizeArgs } from "./runtime/arg-aliases";
+import { normalizeArgs, validateArgs } from "./runtime/args";
 export { findEnclosingSignatures, truncateIfExcessive, rankFiles, identTokens, globToRegex };
 export { baseFileName, compressPaths, formatPathList };
 
@@ -67,6 +67,12 @@ export function dispatchTool(
   // Rewrite legacy parameter names before anything else, so the handlers below
   // only ever see canonical ones and an alias shares the caller's cache entry.
   const args = normalizeArgs(name, rawArgs);
+
+  const invalid = validateArgs(name, args);
+  if (invalid) {
+    log(`[${name}] rejected: unknown parameter(s)`);
+    return invalid;
+  }
 
   // Include projectPath so multiple MCP instances or tests against different
   // projects don't share results. Also include compression mode — same args

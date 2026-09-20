@@ -1,4 +1,4 @@
-import { normalizeArgs } from "../mcp/runtime/arg-aliases";
+import { normalizeArgs, validateArgs } from "../mcp/runtime/args";
 
 describe("normalizeArgs", () => {
   test("maps the primary file input onto path", () => {
@@ -32,5 +32,45 @@ describe("normalizeArgs", () => {
     expect(normalizeArgs("read_file", { path: "a.ts", offset: 1 })).toEqual({ path: "a.ts", offset: 1 });
     expect(normalizeArgs("list_todos", { path_filter: "src" })).toEqual({ path_filter: "src" });
     expect(normalizeArgs("search_code", { query: "x" })).toEqual({ query: "x" });
+  });
+});
+
+describe("validateArgs", () => {
+  test("rejects a parameter the tool does not declare", () => {
+    const error = validateArgs("find_references", { symbol: "handleClick", path: "src/" });
+    expect(error).toContain("find_references");
+    expect(error).toContain("path");
+  });
+
+  test("lists what the tool does accept, so the retry succeeds first try", () => {
+    const error = validateArgs("pattern_search", { pattern: "TODO", path: "src/" });
+    expect(error).toContain("pattern");
+    expect(error).toContain("path_filter");
+    expect(error).toContain("glob");
+  });
+
+  test("names every unknown parameter, not just the first", () => {
+    const error = validateArgs("find_file", { pattern: "auth", scope: "src", limit: 5 });
+    expect(error).toContain("scope");
+    expect(error).toContain("limit");
+  });
+
+  test("accepts a call that only uses declared parameters", () => {
+    expect(validateArgs("search_code", { query: "x", output: "files", path_filter: "src" })).toBeNull();
+    expect(validateArgs("read_file", { path: "a.ts", offset: 1, limit: 40 })).toBeNull();
+  });
+
+  test("a tool with no parameters accepts none", () => {
+    expect(validateArgs("reindex", {})).toBeNull();
+    expect(validateArgs("reindex", { path: "src/" })).toContain("path");
+  });
+
+  test("says nothing about a tool it does not know — the dispatcher reports that", () => {
+    expect(validateArgs("no_such_tool", { anything: 1 })).toBeNull();
+  });
+
+  test("legacy names pass once normalized", () => {
+    expect(validateArgs("outline", normalizeArgs("outline", { file: "a.ts" }))).toBeNull();
+    expect(validateArgs("dead_code", normalizeArgs("dead_code", { scope: "src" }))).toBeNull();
   });
 });

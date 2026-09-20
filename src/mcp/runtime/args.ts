@@ -1,3 +1,5 @@
+// Incoming tool arguments: rewrite legacy names, then reject undeclared ones.
+//
 // One concept, one name.
 //
 // The tools grew six different names for two ideas: the file a tool operates on
@@ -13,6 +15,8 @@
 // `target` is deliberately absent: explain, tests_for and find_writes take a
 // symbol OR a file, so it is not a path parameter. `defined_in` is absent too —
 // it selects which definition to report on, not where results may live.
+
+import { TOOLS } from "../tools-registry";
 
 const ALIASES: Record<string, Record<string, string>> = {
   outline:        { file: "path" },
@@ -40,4 +44,39 @@ export function normalizeArgs(
     normalized[canonical] = value;
   }
   return normalized;
+}
+
+// An undeclared parameter used to be swallowed in silence. That is the worst
+// possible outcome: an agent that passes path="src/" to a tool without path
+// scoping gets whole-project results and concludes they were scoped, then
+// reasons about the codebase on data it believes is narrower than it is. One
+// round-trip spent on an error beats an analysis built on a wrong assumption,
+// so the call is refused and the message names what the tool does accept.
+//
+// Runs after normalizeArgs, so a legacy name is validated in canonical form.
+
+let accepted: Map<string, string[]> | null = null;
+
+function acceptedParams(tool: string): string[] | null {
+  if (!accepted) {
+    accepted = new Map(
+      TOOLS.map((t) => [t.name, Object.keys(t.inputSchema.properties ?? {})])
+    );
+  }
+  return accepted.get(tool) ?? null;
+}
+
+export function validateArgs(tool: string, args: Record<string, unknown>): string | null {
+  const allowed = acceptedParams(tool);
+  // An unknown tool is the dispatcher's error to report, not this one's.
+  if (!allowed) return null;
+
+  const unknown = Object.keys(args).filter((key) => !allowed.includes(key));
+  if (unknown.length === 0) return null;
+
+  const named = unknown.map((u) => `'${u}'`).join(", ");
+  const accepts = allowed.length > 0 ? allowed.join(", ") : "(no parameters)";
+  return `Error: ${tool} does not accept ${named}. Accepted: ${accepts}.\n` +
+    `The call was refused rather than run without it — passing an unsupported ` +
+    `scope would have returned results wider than you asked for.`;
 }
