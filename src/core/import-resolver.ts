@@ -17,7 +17,11 @@ const SOURCE_EXTENSIONS = [
 // A python-style relative specifier: leading dots followed by a module name
 // (".home"), as opposed to a path-style one ("./home").
 const PY_RELATIVE = /^\.+\w/;
-const PY_DOTTED = /^\w+(\.\w+)+$/;
+
+// A namespaced specifier: python "app.core.home", php "App\\Home\\Widget",
+// rust "crate::home::handle_click". A single bare word (an npm package) is not
+// one — it names no path.
+const NAMESPACED = /^[A-Za-z_]\w*(?:(?:\\|::|\.)[A-Za-z_]\w*)+$/;
 
 function mentionsSymbol(clause: string, symbol: string): boolean {
   const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -58,6 +62,39 @@ function candidateTargets(target: string): string[] {
   return forms;
 }
 
+// Namespaces mirror directories: PSR-4 mandates it for php, the module system
+// enforces it for rust, packages do it for python. So the trailing segments
+// identify the file without reading composer.json or locating the crate root —
+// only the leading segments, which map to a configured base directory, are
+// unknown, and dropping them progressively covers that.
+function namespacedCores(specifier: string): string[] {
+  const segments = specifier.split(/\\|::|\./).filter(Boolean);
+  // `crate::` is this crate's source root, conventionally src/.
+  const rooted = segments[0] === "crate" ? ["src", ...segments.slice(1)] : segments;
+
+  // The last segment may be the imported item rather than a module, so each
+  // depth is tried both with it and without it, longest first.
+  const cores: Array<{ core: string; depth: number; dropped: number }> = [];
+  for (const dropped of [0, 1]) {
+    const segs = dropped ? rooted.slice(0, -1) : rooted;
+    for (let depth = segs.length; depth >= 1; depth--) {
+      cores.push({ core: segs.slice(segs.length - depth).join(path.sep), depth, dropped });
+    }
+  }
+
+  return cores
+    .sort((a, b) => b.depth - a.depth || a.dropped - b.dropped)
+    .map((c) => c.core);
+}
+
+function matchesCore(candidate: string, core: string): boolean {
+  return SOURCE_EXTENSIONS.some((ext) =>
+    candidate.endsWith(path.sep + core + ext) ||
+    candidate.endsWith(path.sep + core + path.sep + "mod" + ext) ||
+    candidate.endsWith(path.sep + core + path.sep + "index" + ext)
+  );
+}
+
 function pythonRelativeTarget(fromFile: string, specifier: string): string {
   const depth = specifier.match(/^\.+/)?.[0].length ?? 1;
   let base = path.dirname(fromFile);
@@ -83,12 +120,15 @@ export function resolveImportToCandidate(
     return candidates.find((c) => targets.has(c)) ?? null;
   }
 
-  if (PY_DOTTED.test(specifier)) {
-    const suffix = path.sep + specifier.split(".").join(path.sep);
-    const match = candidates.find((c) =>
-      SOURCE_EXTENSIONS.some((ext) => c.endsWith(suffix + ext))
-    );
-    return match ?? null;
+  if (NAMESPACED.test(specifier)) {
+    // Try the most specific path core first. The first core that matches exactly
+    // one candidate wins; a core matching several is ambiguous and resolves to
+    // nothing, because a wrong attribution is worse than an unattributed one.
+    for (const core of namespacedCores(specifier)) {
+      const matches = candidates.filter((c) => matchesCore(c, core));
+      if (matches.length === 1) return matches[0]!;
+      if (matches.length > 1) return null;
+    }
   }
 
   return null;

@@ -516,6 +516,34 @@ describe("dispatchTool — resolve_import (multi-language)", () => {
     expect(result).not.toContain("admin");
   });
 
+  test("PHP: picks the class the PSR-4 namespace points at, not the other same-named one", () => {
+    write("src/Home/Widget.php", "<?php\nnamespace App\\Home;\nclass Widget {}");
+    write("src/Admin/Widget.php", "<?php\nnamespace App\\Admin;\nclass Widget {}");
+    write("src/Handler/UserHandler.php", "<?php\nuse App\\Admin\\Widget;\nclass UserHandler {}");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "resolve_import",
+      { file: "src/Handler/UserHandler.php", symbol: "Widget" },
+      idx, tmpDir,
+    );
+    expect(result).toContain("Admin/Widget.php");
+    expect(result).not.toContain("Home/Widget.php");
+  });
+
+  test("Rust: resolves crate:: to the module file, not a same-named one elsewhere", () => {
+    write("src/ui/home.rs", "pub fn handle_click() -> u8 { 1 }");
+    write("src/api/home.rs", "pub fn handle_click() -> u8 { 2 }");
+    write("src/main.rs", "use crate::ui::home::handle_click;\nfn main() { handle_click(); }");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "resolve_import",
+      { file: "src/main.rs", symbol: "handle_click" },
+      idx, tmpDir,
+    );
+    expect(result).toContain("ui/home.rs");
+    expect(result).not.toContain("api/home.rs");
+  });
+
   test("reports an ambiguous binding instead of guessing one", () => {
     write("src/admin/Home.tsx", "export function handleClick() { return 'admin'; }");
     write("src/app/Home.tsx", "export function handleClick() { return 'app'; }");

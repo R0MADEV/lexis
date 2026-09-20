@@ -87,6 +87,42 @@ describe("resolveImportToCandidate", () => {
     expect(resolveImportToCandidate(from, "app.core.home", candidates)).toBe(p("app/core/home.py"));
   });
 
+  test("php PSR-4: trailing namespace segments mirror directories", () => {
+    const from = p("src/Handler/UserHandler.php");
+    const candidates = [p("src/Home/Widget.php"), p("vendor/acme/Widget.php")];
+    expect(resolveImportToCandidate(from, "App\\Home\\Widget", candidates)).toBe(p("src/Home/Widget.php"));
+  });
+
+  test("php: the namespace prefix need not match the directory it maps to", () => {
+    const from = p("src/Handler/UserHandler.php");
+    const candidates = [p("lib/Domain/Order/Line.php")];
+    expect(resolveImportToCandidate(from, "Acme\\Domain\\Order\\Line", candidates)).toBe(p("lib/Domain/Order/Line.php"));
+  });
+
+  test("rust: crate:: is the crate src root, and the last segment is the item", () => {
+    const from = p("src/main.rs");
+    const candidates = [p("src/home.rs"), p("src/admin/home.rs")];
+    expect(resolveImportToCandidate(from, "crate::home::handle_click", candidates)).toBe(p("src/home.rs"));
+  });
+
+  test("rust: resolves a module directory to its mod.rs", () => {
+    const from = p("src/main.rs");
+    const candidates = [p("src/home/mod.rs")];
+    expect(resolveImportToCandidate(from, "crate::home::handle_click", candidates)).toBe(p("src/home/mod.rs"));
+  });
+
+  test("rust: nested module path", () => {
+    const from = p("src/main.rs");
+    const candidates = [p("src/ui/home.rs"), p("src/api/home.rs")];
+    expect(resolveImportToCandidate(from, "crate::ui::home::handle_click", candidates)).toBe(p("src/ui/home.rs"));
+  });
+
+  test("a suffix that fits two candidates resolves to nothing rather than a guess", () => {
+    const from = p("src/main.rs");
+    const candidates = [p("a/home/Widget.php"), p("b/home/Widget.php")];
+    expect(resolveImportToCandidate(from, "App\\home\\Widget", candidates)).toBeNull();
+  });
+
   test("returns null for a package import it cannot map to a file", () => {
     const from = p("src/app/Dashboard.ts");
     expect(resolveImportToCandidate(from, "react", [p("src/app/Home.ts")])).toBeNull();
