@@ -501,6 +501,35 @@ describe("dispatchTool — resolve_import (multi-language)", () => {
     );
     expect(result.toLowerCase()).toMatch(/not imported|not found/);
   });
+
+  test("picks the definition the import points at, not the first same-named match", () => {
+    write("src/admin/Home.tsx", "export function handleClick() { return 'admin'; }");
+    write("src/app/Home.tsx", "export function handleClick() { return 'app'; }");
+    write("src/other/Dashboard.tsx", `import { handleClick } from '../app/Home';\nhandleClick();`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "resolve_import",
+      { file: "src/other/Dashboard.tsx", symbol: "handleClick" },
+      idx, tmpDir,
+    );
+    expect(result).toContain("app/Home.tsx");
+    expect(result).not.toContain("admin");
+  });
+
+  test("reports an ambiguous binding instead of guessing one", () => {
+    write("src/admin/Home.tsx", "export function handleClick() { return 'admin'; }");
+    write("src/app/Home.tsx", "export function handleClick() { return 'app'; }");
+    write("src/other/Dashboard.tsx", `import { handleClick } from 'some-package';\nhandleClick();`);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool(
+      "resolve_import",
+      { file: "src/other/Dashboard.tsx", symbol: "handleClick" },
+      idx, tmpDir,
+    );
+    expect(result.toLowerCase()).toContain("ambiguous");
+    expect(result).toContain("admin/Home.tsx");
+    expect(result).toContain("app/Home.tsx");
+  });
 });
 
 describe("dispatchTool — read_file shows enclosing signature", () => {

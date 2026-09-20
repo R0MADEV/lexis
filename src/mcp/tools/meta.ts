@@ -10,6 +10,7 @@ import * as path from "path";
 import { spawnSync } from "child_process";
 import { Index } from "../../core/indexer";
 import { getSymbol } from "../../core/searcher";
+import { attributeReference, findImportSpecifier } from "../../core/import-resolver";
 import { detectLinter } from "../tool-filtering";
 import { runRg } from "../runtime/ripgrep";
 import { formatPathList } from "../runtime/path-utils";
@@ -87,22 +88,27 @@ export function execResolveImport(
   try { content = fs.readFileSync(resolvedFile, "utf-8"); }
   catch { return `Could not read file: ${file}`; }
 
-  const escSym = symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const importPatterns = [
-    new RegExp(`^\\s*import\\b.*\\b${escSym}\\b`, "m"),
-    new RegExp(`^\\s*from\\s+\\S+\\s+import\\b.*\\b${escSym}\\b`, "m"),
-    new RegExp(`^\\s*use\\s+[\\w\\\\:.]*${escSym}\\b`, "m"),
-    new RegExp(`^\\s*(require|include|require_relative)\\b.*${escSym}`, "m"),
-  ];
-
-  const isImported = importPatterns.some((re) => re.test(content));
-  if (!isImported) {
+  const specifier = findImportSpecifier(content, symbol);
+  if (!specifier) {
     return `Symbol "${symbol}" is not imported in ${path.relative(projectRoot, resolvedFile)}.`;
   }
 
-  const def = getSymbol(symbol, undefined, index);
+  // Which definition this file sees is decided by the import, not by whichever
+  // same-named symbol the index happens to list first.
+  const candidates = [...new Set(index.symbols.filter((s) => s.name === symbol).map((s) => s.file))];
+  const attribution = attributeReference(resolvedFile, content, symbol, candidates);
+
+  if (!attribution) {
+    if (candidates.length === 0) {
+      return `Symbol "${symbol}" is imported from "${specifier}" but its definition was not found in the indexed code. May be from an external dependency (node_modules, vendor).`;
+    }
+    const list = candidates.map((c) => `  ${path.relative(projectRoot, c)}`).join("\n");
+    return `Symbol "${symbol}" is imported from "${specifier}", which could not be mapped to a file in this project. The binding is AMBIGUOUS between ${candidates.length} definitions:\n${list}\n\nInspect one with get_symbol + file_filter.`;
+  }
+
+  const def = getSymbol(symbol, attribution.file, index);
   if (!def) {
-    return `Symbol "${symbol}" is imported but its definition was not found in the indexed code. May be from an external dependency (node_modules, vendor).`;
+    return `Symbol "${symbol}" is imported from "${specifier}" but its definition was not found in the indexed code. May be from an external dependency (node_modules, vendor).`;
   }
 
   const relDef = path.relative(projectRoot, def.symbol.file);
