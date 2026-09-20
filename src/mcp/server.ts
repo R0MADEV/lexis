@@ -24,6 +24,7 @@ import { TOOLS } from "./tools-registry";
 import { findEnclosingSignatures, truncateIfExcessive, rankFiles, identTokens, globToRegex } from "./runtime/search-utils";
 import { baseFileName, compressPaths, formatPathList } from "./runtime/path-utils";
 import { normalizeArgs, validateArgs } from "./runtime/args";
+import { watchedDirectories } from "../core/staleness";
 export { findEnclosingSignatures, truncateIfExcessive, rankFiles, identTokens, globToRegex };
 export { baseFileName, compressPaths, formatPathList };
 
@@ -174,20 +175,14 @@ function refreshIfStale(current: Index, resolvedPath: string): Index {
     try { return fs.statSync(f).mtimeMs > indexTime; } catch { return true; }
   });
 
-  // 2. Check all top-level directories for new files — creating a file updates the dir mtime.
-  // Scanning first-level dirs covers any language/framework structure without a hardcoded list.
-  const IGNORE_TOP = new Set([".git", "node_modules", "vendor", "dist", "build", ".next", "__pycache__"]);
-  const topDirs: string[] = [resolvedPath]; // always check project root itself
-  try {
-    for (const entry of fs.readdirSync(resolvedPath, { withFileTypes: true })) {
-      if (entry.isDirectory() && !IGNORE_TOP.has(entry.name)) {
-        topDirs.push(path.join(resolvedPath, entry.name));
-      }
-    }
-  } catch { /* ignore read errors */ }
-
-  const hasNewFile = topDirs.some((dir) => {
-    try { return fs.statSync(dir).mtimeMs > indexTime; } catch { return false; }
+  // 2. Check for files that appeared since the index was built. Creating a file
+  // updates the mtime of the directory it lands in, so every directory holding
+  // indexed code is watched, plus its ancestors — a first-level scan misses
+  // anything nested, which in a real layout is nearly everything.
+  const hasNewFile = watchedDirectories(resolvedPath, current.files).some((dir) => {
+    // Unreadable means unknown, and unknown re-indexes: the check above does the
+    // same, and being wrong in this direction only costs a scan.
+    try { return fs.statSync(dir).mtimeMs > indexTime; } catch { return true; }
   });
 
   if (!hasStaleFile && !hasNewFile) return current;
