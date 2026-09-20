@@ -11,6 +11,7 @@ import { rerankSearchResults } from "../runtime/search-utils";
 import { formatPathList } from "../runtime/path-utils";
 import { isUltraMode } from "../tool-filtering";
 import { buildTrace, formatSuggestions, detectLayer } from "../runtime/format";
+import { intSetting } from "../../core/settings";
 
 function scopeIndex(index: Index, pathFilter: string): Index {
   const matches = (file: string): boolean => pathFilterMatches(file, pathFilter);
@@ -88,7 +89,7 @@ export function execSearchCode(
   }
 
   if (output === "snippet") {
-    const limit = parseInt(process.env["LEXIS_TOOL_RESULT_LIMIT"] ?? "20");
+    const limit = intSetting(process.env["LEXIS_TOOL_RESULT_LIMIT"], 20, "LEXIS_TOOL_RESULT_LIMIT");
     const limited = results.slice(0, limit);
     const overflow = results.length - limited.length;
     const projectRoot = path.resolve(projectPath);
@@ -134,7 +135,7 @@ export function execSearchCode(
   }
 
   if (output === "compact") {
-    const limit = parseInt(process.env["LEXIS_TOOL_RESULT_LIMIT"] ?? "20");
+    const limit = intSetting(process.env["LEXIS_TOOL_RESULT_LIMIT"], 20, "LEXIS_TOOL_RESULT_LIMIT");
     const limited = results.slice(0, limit);
     const overflow = results.length - limited.length;
     const projectRoot = path.resolve(projectPath);
@@ -229,7 +230,7 @@ export function execSearchCode(
   }
 
   // content (default)
-  const limit = parseInt(process.env["LEXIS_TOOL_RESULT_LIMIT"] ?? "20");
+  const limit = intSetting(process.env["LEXIS_TOOL_RESULT_LIMIT"], 20, "LEXIS_TOOL_RESULT_LIMIT");
   const limited = results.slice(0, limit);
   const overflow = results.length - limited.length;
   const projectRoot = path.resolve(projectPath);
@@ -241,7 +242,7 @@ export function execSearchCode(
   // it needs depth, lowers it when just orienting.
   const budget = typeof args["content_budget"] === "number"
     ? (args["content_budget"] as number)
-    : parseInt(process.env["LEXIS_CONTENT_BUDGET"] ?? "2500");
+    : intSetting(process.env["LEXIS_CONTENT_BUDGET"], 2500, "LEXIS_CONTENT_BUDGET");
   const fullBlocks: string[] = [];
   const compactLines: string[] = [];
   let used = 0;

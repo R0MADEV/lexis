@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { LexisTool } from "../../core/chunker";
+import { intSetting } from "../../core/settings";
 
 let _client: Anthropic | null = null;
 function getClient(): Anthropic {
@@ -8,8 +9,8 @@ function getClient(): Anthropic {
 }
 const MODEL = process.env["LEXIS_MODEL_CLAUDE"] ?? "claude-sonnet-4-6";
 
-const MAX_TOOL_RESULT_TOKENS = parseInt(process.env["LEXIS_MAX_TOOL_RESULT_TOKENS"] ?? "15000");
-const MAX_TURNS = parseInt(process.env["LEXIS_MAX_TURNS"] ?? "8");
+const MAX_TOOL_RESULT_TOKENS = intSetting(process.env["LEXIS_MAX_TOOL_RESULT_TOKENS"], 15000, "LEXIS_MAX_TOOL_RESULT_TOKENS");
+const MAX_TURNS = intSetting(process.env["LEXIS_MAX_TURNS"], 8, "LEXIS_MAX_TURNS");
 
 function truncateToolResult(text: string): string {
   const estimatedTokens = Math.ceil(text.length / 4);

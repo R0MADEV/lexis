@@ -15,6 +15,7 @@ import { ask as askOpenAI, askWithTools as askOpenAIWithTools } from "../../adap
 import { Index } from "../../core/indexer";
 import { getGitContext, formatGitContext } from "../../core/git-context";
 import { scanProjectStructure, formatProjectStructure } from "../../core/project-scanner";
+import { intSetting } from "../../core/settings";
 
 type LLMType = "claude" | "openai";
 
@@ -46,7 +47,7 @@ export async function askCommand(question: string, projectPath: string, lang?: s
     console.warn(`[warning] Index is ${Math.floor(ageHours)}h old — run 'lexis index <path>' to refresh.`);
   }
 
-  const maxIterations = parseInt(process.env["LEXIS_MAX_ITERATIONS"] ?? "3");
+  const maxIterations = intSetting(process.env["LEXIS_MAX_ITERATIONS"], 3, "LEXIS_MAX_ITERATIONS");
   const resolvedLang = lang ?? process.env["LEXIS_LANG"] ?? "en";
   const useToolCalling = process.env["LEXIS_TOOL_CALLING"] !== "false";
   const depth = opts?.depth ?? 2;
@@ -119,7 +120,7 @@ async function toolCallingMode(
         }
 
         // default: 'content'
-        const toolLimit = parseInt(process.env["LEXIS_TOOL_RESULT_LIMIT"] ?? "20");
+        const toolLimit = intSetting(process.env["LEXIS_TOOL_RESULT_LIMIT"], 20, "LEXIS_TOOL_RESULT_LIMIT");
         const limited = results.slice(0, toolLimit);
         const overflow = results.length - limited.length;
 
@@ -266,7 +267,7 @@ async function reasoningLoop(
   topK: number = 5,
   depth: number = 2
 ): Promise<void> {
-  const MAX_CONTEXT_TOKENS = parseInt(process.env["LEXIS_MAX_TOKENS"] ?? "100000");
+  const MAX_CONTEXT_TOKENS = intSetting(process.env["LEXIS_MAX_TOKENS"], 100000, "LEXIS_MAX_TOKENS");
   const allChunks: Chunk[] = [];
   const visitedFiles = new Set<string>();
   const searchedQueries = new Set<string>();

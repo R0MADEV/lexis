@@ -5,6 +5,7 @@ import { Index, Symbol } from "./indexer";
 import { pathFilterMatches } from "./path-match";
 import { normalizeRgOutput } from "./rg-output";
 import { detectContext } from "./language-detector";
+import { intSetting } from "./settings";
 import {
   AnalyzedQuery,
   QueryIntent,
@@ -72,7 +73,7 @@ export function search(
   const directEnriched = enrichWithClassContext(direct);
 
   // override via LEXIS_MAX_RESULTS env var (caps total output)
-  const envCap = parseInt(process.env["LEXIS_MAX_RESULTS"] ?? "0");
+  const envCap = intSetting(process.env["LEXIS_MAX_RESULTS"], 0, "LEXIS_MAX_RESULTS");
   // Fix 4: scale result breadth for large indexes (>20k symbols = large project)
   const idxScale = index.symbols.length > 20000 ? 1.5 : index.symbols.length > 5000 ? 1.2 : 1;
   const totalCap = envCap > 0
@@ -1069,8 +1070,8 @@ function extractFunction(file: string, lineNumber: number): { code: string; line
     // return a window of surrounding context instead of trying to delimit a body.
     // tunable via LEXIS_CONTEXT_BEFORE / LEXIS_CONTEXT_AFTER (default: 8 + 12 = 20 lines)
     if (!functionFound) {
-      const before = parseInt(process.env["LEXIS_CONTEXT_BEFORE"] ?? "8");
-      const after = parseInt(process.env["LEXIS_CONTEXT_AFTER"] ?? "12");
+      const before = intSetting(process.env["LEXIS_CONTEXT_BEFORE"], 8, "LEXIS_CONTEXT_BEFORE");
+      const after = intSetting(process.env["LEXIS_CONTEXT_AFTER"], 12, "LEXIS_CONTEXT_AFTER");
       const ctxStart = Math.max(0, lineNumber - 1 - before);
       const ctxEnd = Math.min(lines.length - 1, lineNumber - 1 + after);
       return {
@@ -1247,7 +1248,7 @@ function findEnclosingClass(lines: string[], chunkStartLine: number): { line: st
 // Caps merged chunks at `maxLines` to avoid swallowing the whole file.
 function mergeAdjacent(
   results: SearchResult[],
-  gap: number = parseInt(process.env["LEXIS_MERGE_GAP"] ?? "10"),
+  gap: number = intSetting(process.env["LEXIS_MERGE_GAP"], 10, "LEXIS_MERGE_GAP"),
   maxLines: number = 200
 ): SearchResult[] {
   const byFile = new Map<string, SearchResult[]>();

@@ -9,6 +9,7 @@ import { askCommand } from "./commands/ask";
 import { setupCommand, listClientsCommand } from "./commands/setup";
 import { initCommand } from "./commands/init";
 import { startMcpServer } from "../mcp/server";
+import { intSetting } from "../core/settings";
 
 const program = new Command();
 
@@ -56,8 +57,8 @@ program
   .option("-k, --topk <number>", "Max results per search", "5")
   .action(async (question: string, options: { path: string; lang: string; depth: string; topk: string }) => {
     await askCommand(question, options.path, options.lang, {
-      depth: parseInt(options.depth),
-      topK: parseInt(options.topk),
+      depth: intSetting(options.depth, 2, "--depth"),
+      topK: intSetting(options.topk, 5, "--topk"),
     });
   });
 
