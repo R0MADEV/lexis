@@ -694,6 +694,23 @@ describe("dispatchTool — path scoping", () => {
   });
 });
 
+describe("dispatchTool — a mention is not a definition", () => {
+  test("does not stamp [function] on files that only mention the symbol", () => {
+    // One definition, many mentions — the shape that sends search to ripgrep to
+    // supplement the index. Every hit used to be named after the search term and
+    // typed "function", so an import line claimed to be the definition.
+    write("src/def.ts", "export function widgetHelper() { return 1; }\n");
+    for (let i = 0; i < 8; i++) {
+      write(`src/user${i}.ts`, `import { widgetHelper } from './def';\nexport function caller${i}() { return widgetHelper(); }\n`);
+    }
+    const idx = indexProject(tmpDir, null);
+    const out = dispatchSlashed("search_code", { query: "widgetHelper", top_k: 10 }, idx, tmpDir);
+
+    const mislabelled = out.split("\n").filter((l) => /user\d+\.ts.*\[function\] widgetHelper/.test(l));
+    expect(mislabelled).toEqual([]);
+  });
+});
+
 describe("dispatchTool — top_k is honoured", () => {
   function manyMatches() {
     for (let i = 0; i < 12; i++) {

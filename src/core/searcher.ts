@@ -871,13 +871,20 @@ function searchFile(
 
     const truncated = truncateLongLines(code);
     const matchCount = terms.filter((t) => truncated.includes(t)).length;
+
+    // A hit is a mention until proven otherwise. Naming it after the search term
+    // and typing it "function" turned an import line into a definition of the
+    // thing it imports: searcher.ts:1-18 [function] X, where line 6 reads
+    // `import { X } from "./x"`. When no function name can be read out of the
+    // surrounding code, say unknown rather than borrow the query's word.
+    const enclosing = extractFunctionName(truncated);
     results.push({
       symbol: {
-        name: extractFunctionName(truncated) ?? terms[0] ?? "unknown",
+        name: enclosing ?? terms[0] ?? "unknown",
         file,
         lineStart,
         lineEnd,
-        type: "function",
+        type: enclosing ? "function" : "unknown",
       },
       code: truncated,
       score: matchCount,
@@ -980,13 +987,20 @@ function parseRipgrepOutput(output: string, terms: string[]): SearchResult[] {
 
     const truncated = truncateLongLines(code);
     const matchCount = terms.filter((t) => truncated.includes(t)).length;
+
+    // A hit is a mention until proven otherwise. Naming it after the search term
+    // and typing it "function" turned an import line into a definition of the
+    // thing it imports: searcher.ts:1-18 [function] X, where line 6 reads
+    // `import { X } from "./x"`. When no function name can be read out of the
+    // surrounding code, say unknown rather than borrow the query's word.
+    const enclosing = extractFunctionName(truncated);
     results.push({
       symbol: {
-        name: extractFunctionName(truncated) ?? terms[0] ?? "unknown",
+        name: enclosing ?? terms[0] ?? "unknown",
         file,
         lineStart,
         lineEnd,
-        type: "function",
+        type: enclosing ? "function" : "unknown",
       },
       code: truncated,
       score: matchCount,
