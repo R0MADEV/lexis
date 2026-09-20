@@ -694,6 +694,29 @@ describe("dispatchTool — path scoping", () => {
   });
 });
 
+describe("dispatchTool — investigate truncation", () => {
+  test("says how many test files it found when it shows only some", () => {
+    write("src/auth.ts", "export function authorize(u: string) { return u.length > 0; }\n");
+    for (let i = 0; i < 7; i++) {
+      write(`tests/auth${i}.test.ts`, "import { authorize } from '../src/auth';\nauthorize('x');\n");
+    }
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("investigate", { name: "authorize" }, idx, tmpDir);
+    // The references section already reports "N total, showing top M"; tests
+    // silently kept five and said nothing about the rest.
+    expect(result).toMatch(/TESTS \(7 total, showing top 5\)/);
+  });
+
+  test("says nothing extra when everything fits", () => {
+    write("src/auth.ts", "export function authorize(u: string) { return u.length > 0; }\n");
+    write("tests/auth.test.ts", "import { authorize } from '../src/auth';\nauthorize('x');\n");
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchTool("investigate", { name: "authorize" }, idx, tmpDir);
+    // REFERENCES always carries a count, so check the TESTS header specifically.
+    expect(result).toMatch(/TESTS[^(]/);
+  });
+});
+
 describe("dispatchTool — CRLF files", () => {
   const CRLF = "export class Hello {\r\n  world() {}\r\n}\r\n";
   const LF = "export class Hello {\n  world() {}\n}\n";

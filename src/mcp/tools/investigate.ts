@@ -70,10 +70,14 @@ export function execInvestigate(
   const testStdout = runRg(testRgArgs).stdout.trim();
   if (testStdout) {
     const projectRoot = path.resolve(projectPath);
-    const testFiles = [...new Set(testStdout.split("\n"))]
-      .map((f) => path.relative(projectRoot, f))
-      .slice(0, 5);
-    sections.push(`${sectionHeader("TESTS")}\n${testFiles.join("\n")}`);
+    const allTests = [...new Set(testStdout.split("\n"))].map((f) => path.relative(projectRoot, f));
+    const testFiles = allTests.slice(0, 5);
+    // The references section above reports what it held back; this one used to
+    // drop the rest without a word.
+    const header = allTests.length > testFiles.length
+      ? sectionHeader(`TESTS (${allTests.length} total, showing top ${testFiles.length})`)
+      : sectionHeader("TESTS");
+    sections.push(`${header}\n${testFiles.join("\n")}`);
   }
 
   return sections.join("\n\n");
