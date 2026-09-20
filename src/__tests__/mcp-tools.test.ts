@@ -694,6 +694,39 @@ describe("dispatchTool — path scoping", () => {
   });
 });
 
+describe("dispatchTool — compact carries the line range", () => {
+  // Without an end line the agent knows where a symbol starts but not where it
+  // stops, so it follows every search with an exploratory read. Telemetry put
+  // that at 2.09 read_file per search_code.
+  const LONG_FN = [
+    "export function processOrder(id: string) {",
+    ...Array.from({ length: 12 }, (_, i) => `  const step${i} = ${i};`),
+    "  return id;",
+    "}",
+  ].join("\n");
+
+  test("reports where the symbol ends, not only where it begins", () => {
+    write("src/orders.ts", LONG_FN);
+    const idx = indexProject(tmpDir, null);
+    const result = dispatchSlashed("search_code", { query: "processOrder" }, idx, tmpDir);
+    expect(result).toMatch(/src\/orders\.ts:1-\d+/);
+  });
+
+  test("the range reflects the real extent, not a fixed guess", () => {
+    write("src/orders.ts", LONG_FN);
+    write("src/tiny.ts", "export function tiny() { return 1; }\n");
+    const idx = indexProject(tmpDir, null);
+    const long = dispatchSlashed("search_code", { query: "processOrder" }, idx, tmpDir);
+    const tiny = dispatchSlashed("search_code", { query: "tiny" }, idx, tmpDir);
+    const spanOf = (out: string) => {
+      const m = out.match(/:(\d+)-(\d+)/);
+      return m ? Number(m[2]) - Number(m[1]) : -1;
+    };
+    // The index stores lineStart + 20 for everything; a real range differs per symbol.
+    expect(spanOf(long)).toBeGreaterThan(spanOf(tiny));
+  });
+});
+
 describe("dispatchTool — investigate truncation", () => {
   test("says how many test files it found when it shows only some", () => {
     write("src/auth.ts", "export function authorize(u: string) { return u.length > 0; }\n");

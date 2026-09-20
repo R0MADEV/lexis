@@ -183,15 +183,24 @@ export function execSearchCode(
         // If signature ends with ( or , it's multi-line — add ellipsis
         const displaySig = /[,(]\s*$/.test(sig) ? sig.slice(0, 108) + "…" : sig;
 
+        // The end line is what makes the result actionable: without it the reader
+        // knows where a symbol starts but not how far it runs, so it follows up
+        // with an exploratory read_file. Three tokens here save that round trip.
+        // Search results carry the extent extractFunction measured, not the
+        // lineStart + 20 the index stores.
+        const span = r.symbol.lineEnd > r.symbol.lineStart
+          ? `${r.symbol.lineStart}-${r.symbol.lineEnd}`
+          : `${r.symbol.lineStart}`;
+
         // Ultra mode: 1 line per result (sig only, no preview body, no blank between)
         if (isUltraMode()) {
-          return `${relPath}:${r.symbol.lineStart} ${r.symbol.name} ${displaySig}`;
+          return `${relPath}:${span} ${r.symbol.name} ${displaySig}`;
         }
 
         const preview = body1 && body1 !== displaySig
           ? `  ${displaySig}\n  ${body1}`
           : `  ${displaySig}`;
-        return `${relPath}:${r.symbol.lineStart}  [${r.symbol.type}] ${r.symbol.name}\n${preview}`;
+        return `${relPath}:${span}  [${r.symbol.type}] ${r.symbol.name}\n${preview}`;
       })
       .join(isUltraMode() ? "\n" : "\n\n");
 
