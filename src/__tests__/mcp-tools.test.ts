@@ -694,6 +694,29 @@ describe("dispatchTool — path scoping", () => {
   });
 });
 
+describe("dispatchTool — top_k is honoured", () => {
+  function manyMatches() {
+    for (let i = 0; i < 12; i++) {
+      write(`src/h${i}.ts`, `export function handleThing${i}() { return ${i}; }\n`);
+    }
+    return indexProject(tmpDir, null);
+  }
+
+  const resultCount = (out: string) => out.split("\n\n").filter((b) => /\[\w+\]/.test(b)).length;
+
+  test("returns what the caller asked for, not the env ceiling", () => {
+    const idx = manyMatches();
+    const out = dispatchSlashed("search_code", { query: "handleThing", top_k: 2 }, idx, tmpDir);
+    expect(resultCount(out)).toBeLessThanOrEqual(2);
+  });
+
+  test("defaults to the 3 the schema advertises", () => {
+    const idx = manyMatches();
+    const out = dispatchSlashed("search_code", { query: "handleThing" }, idx, tmpDir);
+    expect(resultCount(out)).toBeLessThanOrEqual(3);
+  });
+});
+
 describe("dispatchTool — compact carries the line range", () => {
   // Without an end line the agent knows where a symbol starts but not where it
   // stops, so it follows every search with an exploratory read. Telemetry put

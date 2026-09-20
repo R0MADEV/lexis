@@ -48,6 +48,12 @@ export function execSearchCode(
   // the scoped index excluded — so the scope is enforced on the results too.
   const found = search(query, scoped, projectPath, topK, depth, intentOverride);
   const rawResults = pathFilter ? found.filter((r) => pathFilterMatches(r.symbol.file, pathFilter)) : found;
+
+  // search() deliberately casts a wider net than top_k so ranking has something
+  // to choose between; the caller still gets what it asked for. The env var is
+  // a ceiling on that, not a replacement for it — reading it alone made top_k
+  // decorative, which is why a top_k of 2, 3 or 10 all returned the same seven.
+  const displayLimit = Math.min(topK, intSetting(process.env["LEXIS_TOOL_RESULT_LIMIT"], 20, "LEXIS_TOOL_RESULT_LIMIT"));
   if (rawResults.length === 0) {
     if (pathFilter) return `No results for "${query}" under path_filter "${pathFilter}".`;
     const suggestions = suggestSimilar(query, index, 5);
@@ -89,7 +95,7 @@ export function execSearchCode(
   }
 
   if (output === "snippet") {
-    const limit = intSetting(process.env["LEXIS_TOOL_RESULT_LIMIT"], 20, "LEXIS_TOOL_RESULT_LIMIT");
+    const limit = displayLimit;
     const limited = results.slice(0, limit);
     const overflow = results.length - limited.length;
     const projectRoot = path.resolve(projectPath);
@@ -135,7 +141,7 @@ export function execSearchCode(
   }
 
   if (output === "compact") {
-    const limit = intSetting(process.env["LEXIS_TOOL_RESULT_LIMIT"], 20, "LEXIS_TOOL_RESULT_LIMIT");
+    const limit = displayLimit;
     const limited = results.slice(0, limit);
     const overflow = results.length - limited.length;
     const projectRoot = path.resolve(projectPath);
@@ -239,7 +245,7 @@ export function execSearchCode(
   }
 
   // content (default)
-  const limit = intSetting(process.env["LEXIS_TOOL_RESULT_LIMIT"], 20, "LEXIS_TOOL_RESULT_LIMIT");
+  const limit = displayLimit;
   const limited = results.slice(0, limit);
   const overflow = results.length - limited.length;
   const projectRoot = path.resolve(projectPath);
