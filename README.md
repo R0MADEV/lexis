@@ -1,12 +1,59 @@
 # lexis-mcp
 
-A code-search MCP server that gives AI coding assistants 28+ specialized tools to navigate large codebases — without burning tokens.
+**Give your AI coding agent a code graph it can query — instead of files it has to read.**
 
-**Result: ~80% fewer tokens per complex task** (measured on real bug investigations in a 500k-line PHP codebase: ~15,000 tokens → ~3,000).
+When Claude Code, Cursor or Cline investigate a bug in your codebase, they read files. Lots of them. A typical bug hunt in a 100k-line repo burns 15,000+ tokens just opening 5–10 files looking for the root cause.
 
-> **Status:** Validated on **Claude Code** (the only client tested in real workflows so far). Should work with any standard MCP client (Cursor, Windsurf, Continue, Cline, Zed, etc.) but those are **untested**. Issues and contributions welcome.
+Lexis exposes ~30 specialized tools to the agent over MCP. It answers questions like *"who calls this function 3 levels up?"*, *"what breaks if I change this signature?"*, *"where is this variable mutated?"* — in **one tool call** with structured AST output, instead of 10 grep+read iterations the agent has to stitch together by hand.
 
-No vectors. No embeddings. No external services. Just ripgrep + AST symbol extraction + smart ranking.
+**Result on a real ~500k LOC PHP codebase: 15,000 tokens → 3,000 per investigation. ~80% reduction.**
+
+No vectors. No embeddings. No external services. Just ripgrep + AST symbol extraction + a local symbol graph.
+
+> **Status:** Validated on **Claude Code** (the only client tested in real workflows so far). Should work with any standard MCP client (Cursor, Windsurf, Continue, Cline, Zed, etc.) but those are **untested**. Issues welcome.
+
+---
+
+## "How is this different from what I already use?"
+
+Fair question — most modern AI tools already do *some* form of code search. Here's where Lexis sits:
+
+| You're using... | What it does | Where it falls short for an LLM agent |
+|---|---|---|
+| **`grep` / `Read` (Claude Code default tools)** | Text search + read files | Returns raw text, not structure. To trace *"who calls X 3 levels up"* the agent has to grep → read → extract callers → grep each → repeat → reconstruct the graph mentally. ~10 calls and a lot of context. |
+| **Cursor / Copilot embeddings** | Semantic similarity over the codebase | Great for *"find code similar to this"*. Bad for *"what depends on this"* — embeddings find *similar*, not *connected*. No call graph. |
+| **IDE built-in search (VSCode, JetBrains)** | Find references, go to definition | Works for humans clicking through results in the UI. Not exposed as tools an LLM agent can call autonomously over MCP. |
+| **Custom skills / system prompts** | Tell the agent *how* to search | Skills are instructions, not capabilities. They still use `grep`+`read` underneath. A skill can't materialize a tool that doesn't exist. |
+
+**Lexis fills the gap:** AST-based call graphs, dependency analysis, and tools like `call_chain`, `impact_analysis`, `find_writes`, `event_handlers` exposed as **first-class MCP tools** the agent invokes in one shot — no manual reconstruction.
+
+It doesn't replace your IDE or your editor's search. It gives the *agent* the tools your IDE already has internally, in a form an LLM can actually call.
+
+---
+
+## Load cost (how much context does Lexis itself consume?)
+
+A real concern with MCP servers: some add **20,000+ tokens** to every session just by being installed — huge tool descriptions, embedded examples, verbose system prompts. That tax eats into the budget you save with smarter search.
+
+Lexis is intentionally minimal:
+
+| Mode | Tools loaded | Tokens to load |
+|---|---|---|
+| **Default** | 30 | **~3,800** |
+| **Ultra** (`LEXIS_COMPRESSION=ultra`) | 29 | **~2,500** |
+
+Measured directly from the MCP `tools/list` payload + the `instructions` field, not estimated. Descriptions average 50–100 chars per tool; no embedded examples in schemas; instructions field is **770 bytes**, not a user manual.
+
+Tools that don't apply to your project are filtered out automatically:
+
+- no linter detected → no `lint`
+- no `.git` → no `git_context` / `recent_changes` / `hot_files`
+- no test folder → no `tests_for`
+- no config files → no `config_lookup`
+
+**Design rule:** every feature pays its own token cost. If the load cost is bigger than the per-query saving, it doesn't belong in the registry. That's why there's no embeddings client, no vector DB, no per-language LSP processes — each would add weight that has to be justified.
+
+> Reproduce the numbers yourself: `node -e "const t=require('lexis-mcp/dist/mcp/tools-registry.js').TOOLS; console.log(Math.round(JSON.stringify(t).length/3.5),'tokens')"`
 
 ---
 
@@ -88,6 +135,31 @@ Six months later you reopen the branch — Claude reads that note immediately on
 **Token totals for this session:** ~2,800 tokens with Lexis vs ~14,000 if Claude had read those files directly.
 
 > *(Numbers measured on a real ~500k LOC PHP/telecom codebase. Names anonymized.)*
+
+---
+
+## How it compares to other MCPs
+
+Honest comparison — not every MCP is trying to do the same thing.
+
+| MCP | Approach | Best for | Limit |
+|---|---|---|---|
+| **lexis-mcp** | Lexical + structural via ripgrep + AST. Pre-builds a symbol index. ~30 specialized tools. | Searching, navigating, and understanding existing code. Bug investigation, feature planning. | Matches by names/tokens, not concepts — finds "AuthService" but won't infer "user identity" without keyword overlap |
+| **filesystem MCP** (official) | Generic read/write of files | Reading/writing files where the AI already knows the path | No search, no symbol extraction, no ranking |
+| **Serena** | Uses LSP (Language Server Protocol) per language | Maximum precision (real type info, real refs) | Requires LSPs installed and running per language; heavier setup |
+| **Repomix** | Bundles the entire repo into one big file for the LLM | Small repos that fit in context | Opposite of token-efficient on large repos |
+| **Context7** | Remote SSE server for library documentation | Looking up API docs of public packages | Doesn't index your project code |
+
+**When to use Lexis:**
+- Large codebases where reading whole files is wasteful
+- Multi-language / multi-stack projects (e.g., PHP + Asterisk + Kamailio)
+- You want zero per-project setup once installed globally
+- You don't want native dependencies or embedding databases
+
+**When NOT to use Lexis:**
+- Tiny codebases — Repomix or just `Read` is fine
+- You need real type-checked references — Serena (LSP) is more precise
+- You only need to look up library docs — use Context7
 
 ---
 
@@ -176,6 +248,8 @@ lexis setup --global --client <id>
 | `trace` | ~80 | Follow a call chain |
 | `arch` | ~30 | Architecture-level overview |
 
+> **`content` is budget-capped.** By default it emits full bodies up to ~2,500 tokens per call; results past the budget come back as compact previews (signature + one body line) you can judge before fetching them full with `get_symbol`. Raise it for a single call with the `content_budget` arg when you need many full bodies, or set the baseline policy with the `LEXIS_CONTENT_BUDGET` env var.
+
 ---
 
 ## Indexed languages and DSLs
@@ -191,31 +265,6 @@ TypeScript, JavaScript, Python, Go, Rust, Ruby, Java, Kotlin, C#, PHP, C/C++, Sw
 **Framework awareness**: Symfony Routes (PHP attributes), React/Vue, Next.js, Laravel, Spring, Django/Flask, Express, Nuxt.
 
 **Anything else**: tools that depend on the symbol graph fall back to ripgrep with universal definition patterns (`def`, `fn`, `class`, `module`, etc.) so they still return useful results in unsupported languages.
-
----
-
-## How it compares to other MCPs
-
-Honest comparison — not every MCP is trying to do the same thing.
-
-| MCP | Approach | Best for | Limit |
-|---|---|---|---|
-| **lexis-mcp** | Lexical + structural via ripgrep + AST. Pre-builds a symbol index. 28 specialized tools. | Searching, navigating, and understanding existing code. Bug investigation, feature planning. | Matches by names/tokens, not concepts — finds "AuthService" but won't infer "user identity" without keyword overlap |
-| **filesystem MCP** (official) | Generic read/write of files | Reading/writing files where the AI already knows the path | No search, no symbol extraction, no ranking |
-| **Serena** | Uses LSP (Language Server Protocol) per language | Maximum precision (real type info, real refs) | Requires LSPs installed and running per language; heavier setup |
-| **Repomix** | Bundles the entire repo into one big file for the LLM | Small repos that fit in context | Opposite of token-efficient on large repos |
-| **Context7** | Remote SSE server for library documentation | Looking up API docs of public packages | Doesn't index your project code |
-
-**When to use Lexis:**
-- Large codebases where reading whole files is wasteful
-- Multi-language / multi-stack projects (e.g., PHP + Asterisk + Kamailio)
-- You want zero per-project setup once installed globally
-- You don't want native dependencies or embedding databases
-
-**When NOT to use Lexis:**
-- Tiny codebases — Repomix or just `Read` is fine
-- You need real type-checked references — Serena (LSP) is more precise
-- You only need to look up library docs — use Context7
 
 ---
 
@@ -366,6 +415,7 @@ Lexis works with zero configuration. Optional environment variables:
 |---|---|
 | `LEXIS_NO_AUTOSETUP=1` | Skip postinstall auto-registration |
 | `LEXIS_TOOL_RESULT_LIMIT` | Max results per tool (default: 20) |
+| `LEXIS_CONTENT_BUDGET` | Max ~tokens of full code in `content` mode before extra results demote to compact previews (default: 2500). Overridable per call with the `content_budget` arg. |
 | `LEXIS_DEBUG=true` | Verbose logging on stderr |
 
 ---
