@@ -75,6 +75,20 @@ describe("validateArgs", () => {
   });
 });
 
+describe("validateArgs — the reason it gives", () => {
+  test("does not claim the result would have been wider — that is only true of a scope", () => {
+    // Real refusal: pattern_search called with output:"files". Ignoring `output`
+    // would have returned the same matches in another shape, not more of them.
+    const error = validateArgs("pattern_search", { pattern: "x", output: "files" });
+    expect(error).not.toContain("wider");
+  });
+
+  test("still explains why it refused rather than running", () => {
+    const error = validateArgs("pattern_search", { pattern: "x", output: "files" });
+    expect(error?.toLowerCase()).toContain("refused");
+  });
+});
+
 describe("validateArgs — did you mean", () => {
   test("points at the parameter the name was a near-miss for", () => {
     const error = validateArgs("search_code", { query: "x", path: "src/" });

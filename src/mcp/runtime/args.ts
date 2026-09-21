@@ -47,12 +47,12 @@ export function normalizeArgs(
   return normalized;
 }
 
-// An undeclared parameter used to be swallowed in silence. That is the worst
-// possible outcome: an agent that passes path="src/" to a tool without path
-// scoping gets whole-project results and concludes they were scoped, then
-// reasons about the codebase on data it believes is narrower than it is. One
-// round-trip spent on an error beats an analysis built on a wrong assumption,
-// so the call is refused and the message names what the tool does accept.
+// An undeclared parameter used to be swallowed in silence, and what the caller
+// got back never mentioned it. A scope that was ignored gives whole-project
+// results the reader believes were narrowed; a format that was ignored gives a
+// shape the reader parses as another one. Both read as success. One round-trip
+// spent on an error beats work built on a wrong assumption, so the call is
+// refused and the message names what the tool does accept.
 //
 // Runs after normalizeArgs, so a legacy name is validated in canonical form.
 
@@ -84,8 +84,8 @@ export function validateArgs(tool: string, args: Record<string, unknown>): strin
     : "";
 
   return `Error: ${tool} does not accept ${named}.${hint} Accepted: ${accepts}.\n` +
-    `The call was refused rather than run without it — passing an unsupported ` +
-    `scope would have returned results wider than you asked for.`;
+    `Refused rather than run while ignoring it: the result would not have been ` +
+    `what you asked for, and nothing in it would have said so.`;
 }
 
 // The two ways a parameter name goes wrong. A near-miss on the concept — "path"
